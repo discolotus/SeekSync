@@ -3,6 +3,11 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-08-03
+
+- Update CI to the current GitHub Actions runtime while preserving the verified
+  application package and icon pipeline.
+
 ## [0.1.0] - 2026-08-03
 
 - Add a responsive native macOS library and inspector interface.
