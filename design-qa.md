@@ -1,64 +1,103 @@
-# SeekSync Direction A — QA Record
+# SeekSync responsive design QA
 
-## Current result
+## Artifacts
 
-Direction A is the only interface in the app. Directions B and C, their selector, and their keyboard shortcuts have been removed.
+- Source visual truth: `/var/folders/t7/37h7jgy56sv2zwgf0mbv3wtc0000gn/T/codex-clipboard-67d9eabf-f08f-46a7-8d7f-08ad282039b8.png`
+- Source pixels: 2370 × 1472, macOS Retina capture at approximately 2× density.
+- Source state: dark appearance, playlist library, playlist selected, details open, real Spotify catalog content.
+- Standard implementation: `/private/tmp/seeksync-ui-qa-v2/implementation-standard-1180x720@2x.png`
+- Standard implementation pixels/CSS/density: 2360 × 1440; 1180 × 720 points; 2×.
+- Compact implementation: `/private/tmp/seeksync-ui-qa-v2/implementation-compact-994x624@2x.png`
+- Compact implementation pixels/CSS/density: 1988 × 1248; 994 × 624 points; 2×.
+- Settings implementation: `/private/tmp/seeksync-ui-qa-v2/implementation-settings-660x560@2x.png`
+- Sync-preview implementation: `/private/tmp/seeksync-ui-qa-v2/implementation-sync-preview-680x500@2x.png`
+- Canonical icon source: `Resources/AppIconSource.png`, 1254 × 1254 pixels.
+- Frontend identity implementation: `/private/tmp/seeksync-ui-qa-v2/implementation-brand-header-320x80@2x.png`, 640 × 160 pixels at 2×.
+- Icon/identity comparison: `/private/tmp/seeksync-ui-qa-v2/comparison-app-icon-vs-brand-header-640x160@2x.png`, 1280 × 320 pixels at 2×.
+- Theme/state: dark appearance, Simulation mode, isolated fixture config/state, `Midnight Drive` selected, details presented.
 
-The packaged app launches as a responsive Library + Inspector window. At compact widths the inspector stays closed until requested from the toolbar, so playlist selection cannot widen or crop the window. The Simulation/Live safety state remains visible in the toolbar.
+## Normalization
 
-## Visual baseline
+- Full-view comparison: `/private/tmp/seeksync-ui-qa-v2/comparison-full-source-vs-standard.png`.
+- Focused inspector comparison: `/private/tmp/seeksync-ui-qa-v2/comparison-focused-inspector-source-vs-compact.png`.
+- The full comparison normalizes both images to a 2360 × 1440 panel and places source left, implementation right.
+- The focused comparison crops the source and implementation detail regions, normalizes both to 840 × 1248, and places source left, implementation right.
+- The source includes native window chrome and live Spotify artwork; the app-scoped implementation render excludes window chrome and uses deterministic fixture artwork. Those state differences are not treated as fidelity defects.
 
-- Failure baseline: `/var/folders/t7/37h7jgy56sv2zwgf0mbv3wtc0000gn/T/codex-clipboard-2599090e-bc9b-4f54-90d7-a49e33e31c91.png`
-- Repaired Direction A capture: `/private/tmp/seeksync-final-a-994x624-postlaunch.png`
-- QA size: 994 × 624 points
-- Minimum supported content size: 860 × 520 points
-- Default content size: 1180 × 720 points
+## Findings
 
-The failure baseline is not a visual target. It demonstrates a window that was larger than the visible display and therefore lost the header, artwork, safety state, and prototype controls outside the frame.
+- [P2] Full integrated native-window evidence is incomplete.
+  - Location: full-view implementation, native `NavigationSplitView` sidebar layer and sync-preview native GroupBox layer.
+  - Evidence: the app-scoped renderer captures the primary library, inline/overlay details, Settings, and sheet frame, but rasterizes the native sidebar/GroupBox layers as blank. The full comparison therefore cannot prove the final sidebar/footer fix and every sync-preview row in one integrated frame.
+  - Impact: the code, tests, and focused visual evidence are strong, but a complete visual handoff would overstate what was actually captured.
+  - Fix: obtain a user-supplied app-window screenshot or another narrow app-window capture mechanism. Do not request broad screen/audio permission.
 
-## Direction A checks
+## Required fidelity surfaces
 
-- Native `WindowGroup` launches a standard restorable window.
-- Sidebar width is 170–220 points; playlist content has a 380-point minimum.
-- The optional native inspector is 300–400 points and does not force open at compact widths.
-- Search, playlist selection, primary sync action, explicit status text, and toolbar safety state remain available.
-- Selection uses a leading accent and restrained tint rather than a heavy full-row block.
-- Demo playlists are labeled as demo data.
-- Command preview is disclosed on demand and remains selectable without dominating the inspector.
-- Progress views have descriptive accessibility labels and values.
-- Color is accompanied by status text or symbols.
+- Fonts and typography: system font family and rounded display treatment are preserved. Title, metadata, status, and policy hierarchies remain consistent. Focused captures show no action-label, percentage, or policy-value truncation. Long policy values reflow vertically.
+- Spacing and layout rhythm: the unnecessary 48-point top inset is removed. Sidebar/list widths no longer depend on inspector compression. Compact details use a 360–420-point overlay; standard/wide details use a 340/380-point inline panel. Settings and sync preview use bounded, scrollable frames.
+- Colors and tokens: semantic system/accent colors, secondary text, materials, status orange/blue/green/red, dividers, and selection tint remain mapped to the existing design language. Contrast appears consistent in dark mode; light mode remains unverified.
+- Image quality and asset fidelity: production continues to use Spotify `AsyncImage` artwork when available. The visual QA fixture intentionally uses the existing generated fallback because no live artwork is loaded; it is not a production replacement for the source artwork.
+- Copy and content: app-specific copy is preserved except for the removal of redundant sidebar execution-mode text and the addition of `Playlist details` / `Compact view` to orient the overlay. Simulation safety copy remains visible in the toolbar and preview.
+- Icons and interactions: existing SF Symbols are preserved. Compact details add a real SF Symbol close control, Escape shortcut, click-outside dismissal, automatic opening after playlist selection, and reduced-motion-aware animation.
+- Product identity: the packaged `AppIcon.icns` is now the canonical frontend mark. A shared lockup presents that exact icon in the sidebar and menu popover; the menu-bar status glyph stays monochrome for macOS legibility. The icon is decorative in the lockup, with one combined accessibility label.
 
-## Backend behavior checks
+## Comparison history
 
-- Spotify responses tolerate nullable artwork and null playlist records.
-- Every `next` page is followed and repeated playlist IDs are removed while preserving order.
-- An expired access token triggers one refresh and retries the catalog with the new token.
-- Imported and catalog playlists use the same Sockseek sync path.
-- Command construction includes a stable index, JSON progress, preferred-condition rechecks, playlist writing, and an explicit YouTube fallback policy.
-- The installed Sockseek 3 binary completed a local mock run and emitted terminal JSON that SeekSync parsed into result counts.
-- Sockseek output is streamed into the active run so progress and terminal counts update before the process exits.
-- Completed and partial results update playlist track counts and local coverage.
-- Spotify refreshes preserve local coverage and sync status, while catalog metadata replaces matching pasted-URL placeholders.
-- Both terminal `track_state` events and already-indexed outcomes embedded in the initial `track_list` are counted; a real two-pass Sockseek run covers the repeat-sync path.
-- Cancellation terminates the child process owned by SeekSync.
-- Live scheduling remains separately armed and fixture playlists cannot start a live download.
+### Iteration 0 — source failure
 
-## Automated verification
+- Earlier P1: details actions and policy content clip beyond the right edge.
+- Earlier P2: top dead band wastes 48 points of vertical space.
+- Earlier P2: fixed Settings/sync-preview sizing can exceed the practical display height.
+- Fixes: adaptive overlay/inline details modes, `ViewThatFits` action/metric/policy layouts, removed top inset, bounded scrollable Settings and sync preview.
 
-- 39 tests pass with zero failures; the explicitly gated live Spotify and bounded live-sync tests are skipped during isolated runs.
-- The production app bundle builds successfully.
-- The packaged app passes strict deep code-signature verification.
-- The app can be launched directly with isolated config and state paths; Finder and global screen/audio access are not required.
+### Iteration 1 — packaged app state
 
-## Live acceptance proof
+- Earlier P2: redundant sidebar execution-mode copy was clipped at the bottom.
+- Fix: removed duplicate footer copy; execution mode remains in the toolbar.
+- Post-fix evidence: component and focused-region app-scoped renders under `/private/tmp/seeksync-ui-qa-v2/`.
 
-After explicit authorization on 2026-08-03:
+### Iteration 2 — focused post-fix comparison
 
-- The real-account catalog test passed in 4.94 seconds after consuming every Spotify page and rejecting duplicate IDs.
-- The final app persisted 575 Spotify playlists with 575 unique IDs and zero fixture playlists.
-- The bounded live-sync test passed in 55.76 seconds with `--number 1` and YouTube fallback disabled.
-- Sockseek produced exactly one audio file and the stable playlist index inside a unique temporary QA folder; the test removed that folder afterward.
-- The configured music library was not used by the acceptance test.
-- The packaged real-account app relaunched in Simulation mode with unattended scheduling disarmed.
+- The source detail action row is visibly cut off; the compact implementation keeps both actions fully visible.
+- Source coverage/policy content reaches or crosses the visible edge; implementation values and status pills fit and retain hierarchy.
+- No new actionable P0/P1/P2 mismatch is visible in the captured library/detail regions.
+- Remaining blocker: complete integrated native sidebar and sync-preview layer capture.
 
-Global appearance switching and an interactive VoiceOver session are also outside this app-only QA pass. The implementation uses semantic colors, native typography, accessibility labels and values, keyboard-accessible controls, and textual status so those safeguards do not depend on global screen control.
+### Iteration 3 — app identity alignment
+
+- Earlier P2: the Dock/Finder icon and sidebar identity used visibly different artwork; the menu popover had no product lockup.
+- Fix: introduced `SeekSyncBrandAssets`, `SeekSyncAppIcon`, and `SeekSyncBrandHeader`, using the packaged icon rather than an approximate redraw.
+- Post-fix evidence: `/private/tmp/seeksync-ui-qa-v2/comparison-app-icon-vs-brand-header-640x160@2x.png` shows the canonical icon and frontend lockup together.
+- No clipping, interpolation artifact, duplicate accessibility announcement, or visual identity mismatch is visible in the accepted component render.
+
+## Primary interactions and verification
+
+- Compact and standard details-presented states rendered at supported sizes.
+- Playlist selection is wired to present details automatically.
+- Compact close button, Escape shortcut, click-outside dismissal, and reduced-motion behavior are implemented.
+- Settings and sync preview render inside bounded scrollable frames.
+- `make test`: 40 tests executed, 2 explicitly gated live tests skipped, 0 failures.
+- Packaged app: `dist/SeekSync.app`; `codesign --verify --deep --strict --verbose=2` passed after the final rebuild.
+- Browser console: not applicable to this native SwiftUI app. Build/test logs are the relevant error surface.
+
+## Implementation checklist
+
+- [x] Preserve the existing visual language and native typography.
+- [x] Remove the extra top inset.
+- [x] Prevent the inspector from squeezing the compact layout.
+- [x] Reflow inspector actions, metrics, pills, and policy values.
+- [x] Remove clipped redundant sidebar copy.
+- [x] Bound and scroll Settings and sync-preview windows.
+- [x] Add compact/standard app-scoped render smoke coverage.
+- [x] Align the sidebar and menu popover identity with the packaged app icon.
+- [ ] Capture one final integrated app window without broad screen/audio access.
+
+## Follow-up polish
+
+- [P3] Verify light appearance, keyboard focus traversal, and VoiceOver announcements in a user-driven pass.
+- [P3] Consider replacing the `Compact view` subtitle with the selected playlist owner when the layout is stable.
+
+final result: blocked
+
+Blocker: the narrow app-scoped renderer cannot faithfully capture the native sidebar and every sync-preview GroupBox layer in one integrated window, and broad screen/audio access is intentionally not requested.

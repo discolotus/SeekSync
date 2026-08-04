@@ -16,4 +16,5 @@ enum SeekSyncLayoutMode: Equatable {
     }
 
     var defaultsToOpenInspector: Bool { self != .compact }
+    var usesOverlayInspector: Bool { self == .compact }
 }

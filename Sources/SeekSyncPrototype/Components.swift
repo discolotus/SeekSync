@@ -1,6 +1,53 @@
 import AppKit
 import SwiftUI
 
+enum SeekSyncBrandAssets {
+    static let applicationIcon: NSImage = {
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let image = NSImage(contentsOf: url) {
+            return image
+        }
+        return NSImage(named: NSImage.applicationIconName) ?? NSImage(size: NSSize(width: 128, height: 128))
+    }()
+}
+
+struct SeekSyncAppIcon: View {
+    var size: CGFloat
+    var image: NSImage = SeekSyncBrandAssets.applicationIcon
+
+    var body: some View {
+        Image(nsImage: image)
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .frame(width: size, height: size)
+            .accessibilityHidden(true)
+    }
+}
+
+struct SeekSyncBrandHeader: View {
+    var iconSize: CGFloat = 38
+    var image: NSImage = SeekSyncBrandAssets.applicationIcon
+    var subtitle = "PLAYLIST SYNC"
+
+    var body: some View {
+        HStack(spacing: 10) {
+            SeekSyncAppIcon(size: iconSize, image: image)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("SeekSync")
+                    .font(.headline)
+                Text(subtitle)
+                    .font(.system(size: 9, weight: .bold))
+                    .tracking(1.1)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("SeekSync, playlist sync")
+    }
+}
+
 struct PlaylistArtwork: View {
     let playlist: Playlist
     var size: CGFloat = 54

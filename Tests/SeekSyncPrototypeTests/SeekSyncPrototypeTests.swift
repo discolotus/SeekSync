@@ -1,3 +1,5 @@
+import AppKit
+import SwiftUI
 import XCTest
 @testable import SeekSyncPrototype
 
@@ -13,12 +15,157 @@ final class SeekSyncLayoutModeTests: XCTestCase {
         XCTAssertEqual(SeekSyncLayoutMode(width: 860), .compact)
         XCTAssertEqual(SeekSyncLayoutMode(width: 994), .compact)
         XCTAssertFalse(SeekSyncLayoutMode(width: 994).defaultsToOpenInspector)
+        XCTAssertTrue(SeekSyncLayoutMode(width: 1_049).usesOverlayInspector)
     }
 
     func testStandardAndWideLayoutsUseExpandedPresentation() {
         XCTAssertEqual(SeekSyncLayoutMode(width: 1_050), .standard)
         XCTAssertEqual(SeekSyncLayoutMode(width: 1_280), .wide)
         XCTAssertTrue(SeekSyncLayoutMode(width: 1_280).defaultsToOpenInspector)
+        XCTAssertFalse(SeekSyncLayoutMode(width: 1_050).usesOverlayInspector)
+    }
+}
+
+@MainActor
+final class SeekSyncVisualRenderTests: XCTestCase {
+    func testSupportedWindowLayoutsAndSheetsRenderInAppScopedWindows() throws {
+        let model = AppModel()
+        model.selectedPlaylistID = Playlist.samples[0].id
+        model.showSyncPreview(for: Playlist.samples[0])
+        let pendingSync = try XCTUnwrap(model.pendingSync)
+
+        let compact = LibraryInspectorVariant(
+            showAddPlaylist: .constant(false),
+            inspectorPresented: .constant(true)
+        )
+        .environmentObject(model)
+        .frame(width: 994, height: 624)
+        .background(Color(nsColor: .windowBackgroundColor))
+
+        let standard = LibraryInspectorVariant(
+            showAddPlaylist: .constant(false),
+            inspectorPresented: .constant(true)
+        )
+        .environmentObject(model)
+        .frame(width: 1_180, height: 720)
+        .background(Color(nsColor: .windowBackgroundColor))
+
+        let settings = SettingsScreen()
+            .environmentObject(model)
+            .frame(width: 660, height: 560)
+            .background(Color(nsColor: .windowBackgroundColor))
+
+        let syncPreview = SyncPreviewSheet(pending: pendingSync)
+            .environmentObject(model)
+
+        let compactPNG = try renderPNG(AnyView(compact), size: NSSize(width: 994, height: 624))
+        let standardPNG = try renderPNG(AnyView(standard), size: NSSize(width: 1_180, height: 720))
+        let settingsPNG = try renderPNG(AnyView(settings), size: NSSize(width: 660, height: 560))
+        let syncPreviewPNG = try renderPNG(AnyView(syncPreview), size: NSSize(width: 680, height: 500))
+        let sourceIconURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Resources/AppIconSource.png")
+        let sourceIcon = try XCTUnwrap(NSImage(contentsOf: sourceIconURL))
+        let brandHeader = SeekSyncBrandHeader(iconSize: 48, image: sourceIcon)
+            .padding(16)
+            .frame(width: 320, height: 80)
+            .background(Color(nsColor: .windowBackgroundColor))
+            .preferredColorScheme(.dark)
+        let brandHeaderPNG = try renderPNG(AnyView(brandHeader), size: NSSize(width: 320, height: 80))
+        let identityComparison = HStack(spacing: 24) {
+            VStack(spacing: 8) {
+                Text("BUNDLED APP ICON")
+                    .font(.caption2.bold())
+                    .tracking(1)
+                    .foregroundStyle(.secondary)
+                SeekSyncAppIcon(size: 84, image: sourceIcon)
+            }
+            .frame(width: 180)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("FRONTEND IDENTITY")
+                    .font(.caption2.bold())
+                    .tracking(1)
+                    .foregroundStyle(.secondary)
+                SeekSyncBrandHeader(iconSize: 48, image: sourceIcon)
+            }
+            .frame(width: 360, alignment: .leading)
+        }
+        .padding(20)
+        .frame(width: 640, height: 160)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .preferredColorScheme(.dark)
+        let identityComparisonPNG = try renderPNG(
+            AnyView(identityComparison),
+            size: NSSize(width: 640, height: 160)
+        )
+
+        XCTAssertGreaterThan(compactPNG.count, 10_000)
+        XCTAssertGreaterThan(standardPNG.count, 10_000)
+        XCTAssertGreaterThan(settingsPNG.count, 10_000)
+        XCTAssertGreaterThan(syncPreviewPNG.count, 10_000)
+        XCTAssertGreaterThan(brandHeaderPNG.count, 8_000)
+        XCTAssertGreaterThan(identityComparisonPNG.count, 12_000)
+
+        if let outputPath = ProcessInfo.processInfo.environment["SEEKSYNC_VISUAL_QA_DIR"], !outputPath.isEmpty {
+            let outputDirectory = URL(fileURLWithPath: outputPath, isDirectory: true)
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+            try compactPNG.write(to: outputDirectory.appendingPathComponent("implementation-compact-994x624@2x.png"), options: .atomic)
+            try standardPNG.write(to: outputDirectory.appendingPathComponent("implementation-standard-1180x720@2x.png"), options: .atomic)
+            try settingsPNG.write(to: outputDirectory.appendingPathComponent("implementation-settings-660x560@2x.png"), options: .atomic)
+            try syncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-sync-preview-680x500@2x.png"), options: .atomic)
+            try brandHeaderPNG.write(to: outputDirectory.appendingPathComponent("implementation-brand-header-320x80@2x.png"), options: .atomic)
+            try identityComparisonPNG.write(to: outputDirectory.appendingPathComponent("comparison-app-icon-vs-brand-header-640x160@2x.png"), options: .atomic)
+        }
+    }
+
+    private func renderPNG(_ view: AnyView, size: NSSize) throws -> Data {
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame = NSRect(origin: .zero, size: size)
+
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.backgroundColor = .windowBackgroundColor
+        window.contentView = hostingView
+        window.orderFront(nil)
+        window.layoutIfNeeded()
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(size.width * 2),
+            pixelsHigh: Int(size.height * 2),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw XCTSkip("Could not allocate the offscreen bitmap.")
+        }
+        bitmap.size = size
+        hostingView.cacheDisplay(in: hostingView.bounds, to: bitmap)
+
+        guard let png = bitmap.representation(using: .png, properties: [:]) else {
+            throw XCTSkip("Could not encode the offscreen render as PNG.")
+        }
+        window.orderOut(nil)
+        return png
     }
 }
 

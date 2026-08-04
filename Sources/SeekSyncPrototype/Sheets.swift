@@ -72,71 +72,79 @@ struct SyncPreviewSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 16) {
-                PlaylistArtwork(playlist: pending.playlist, size: 72)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Sync preview").font(.caption.bold()).foregroundStyle(.secondary)
-                    Text(pending.playlist.name).font(.title2.bold())
-                    Text("\(pending.playlist.trackCount) tracks · \(pending.trigger.rawValue.lowercased()) run")
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                StatusPill(
-                    text: model.settings.executionMode.rawValue,
-                    systemImage: model.settings.executionMode == .simulate ? "sparkles" : "arrow.down.circle.fill",
-                    tone: model.settings.executionMode == .simulate ? .blue : .orange
-                )
-            }
-
-            GroupBox {
-                VStack(alignment: .leading, spacing: 12) {
-                    LabeledContent("Destination", value: model.settings.outputDirectory)
-                    LabeledContent("Preferred target", value: model.settings.preferredFormatLabel)
-                    LabeledContent(
-                        "Preferred-target recheck",
-                        value: model.settings.lookForPreferredQuality ? "Enabled" : "Disabled"
-                    )
-                    Picker("YouTube fallback", selection: policyBinding) {
-                        ForEach(YouTubePolicy.allCases) { Text($0.rawValue).tag($0) }
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(spacing: 16) {
+                        PlaylistArtwork(playlist: pending.playlist, size: 72)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Sync preview").font(.caption.bold()).foregroundStyle(.secondary)
+                            Text(pending.playlist.name)
+                                .font(.title2.bold())
+                                .lineLimit(2)
+                            Text("\(pending.playlist.trackCount) tracks · \(pending.trigger.rawValue.lowercased()) run")
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        StatusPill(
+                            text: model.settings.executionMode.rawValue,
+                            systemImage: model.settings.executionMode == .simulate ? "sparkles" : "arrow.down.circle.fill",
+                            tone: model.settings.executionMode == .simulate ? .blue : .orange
+                        )
                     }
-                    .pickerStyle(.segmented)
-                    Text("Fallback is tried only when Soulseek returns no suitable candidate. It can improve coverage, but its output does not automatically satisfy the preferred target.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+
+                    GroupBox {
+                        VStack(alignment: .leading, spacing: 12) {
+                            LabeledContent("Destination", value: model.settings.outputDirectory)
+                            LabeledContent("Preferred target", value: model.settings.preferredFormatLabel)
+                            LabeledContent(
+                                "Preferred-target recheck",
+                                value: model.settings.lookForPreferredQuality ? "Enabled" : "Disabled"
+                            )
+                            Picker("YouTube fallback", selection: policyBinding) {
+                                ForEach(YouTubePolicy.allCases) { Text($0.rawValue).tag($0) }
+                            }
+                            .pickerStyle(.segmented)
+                            Text("Fallback is tried only when Soulseek returns no suitable candidate. It can improve coverage, but its output does not automatically satisfy the preferred target.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(4)
+                    } label: {
+                        Label("Effective policy", systemImage: "slider.horizontal.3")
+                    }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Sanitized command").font(.caption.bold()).foregroundStyle(.secondary)
+                        ScrollView(.horizontal) {
+                            Text(model.command(for: effectivePending).displayString)
+                                .font(.system(.caption, design: .monospaced))
+                                .textSelection(.enabled)
+                        }
+                        .padding(10)
+                        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+                    }
+
+                    if model.settings.executionMode == .live {
+                        Label("This will start a real Sockseek download process. Existing indexed files are skipped unless they miss the preferred conditions.", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .font(.callout)
+                    } else {
+                        Label("Simulation exercises the app flow and changes no music files.", systemImage: "checkmark.shield.fill")
+                            .foregroundStyle(.blue)
+                            .font(.callout)
+                    }
+
+                    if let startBlocker {
+                        Label(startBlocker, systemImage: "xmark.octagon.fill")
+                            .foregroundStyle(.red)
+                            .font(.callout)
+                    }
                 }
-                .padding(4)
-            } label: {
-                Label("Effective policy", systemImage: "slider.horizontal.3")
+                .padding(24)
             }
 
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Sanitized command").font(.caption.bold()).foregroundStyle(.secondary)
-                ScrollView(.horizontal) {
-                    Text(model.command(for: effectivePending).displayString)
-                        .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
-                }
-                .padding(10)
-                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
-            }
-
-            if model.settings.executionMode == .live {
-                Label("This will start a real Sockseek download process. Existing indexed files are skipped unless they miss the preferred conditions.", systemImage: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
-                    .font(.callout)
-            } else {
-                Label("Simulation exercises the app flow and changes no music files.", systemImage: "checkmark.shield.fill")
-                    .foregroundStyle(.blue)
-                    .font(.callout)
-            }
-
-            if let startBlocker {
-                Label(startBlocker, systemImage: "xmark.octagon.fill")
-                    .foregroundStyle(.red)
-                    .font(.callout)
-            }
-
+            Divider()
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
@@ -148,9 +156,11 @@ struct SyncPreviewSheet: View {
                 .keyboardShortcut(.defaultAction)
                 .disabled(startBlocker != nil)
             }
+            .padding(.horizontal, 24)
+            .padding(.vertical, 14)
+            .background(.bar)
         }
-        .padding(24)
-        .frame(width: 680)
+        .frame(width: 680, height: 500)
     }
 
     private var startBlocker: String? {

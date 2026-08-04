@@ -6,21 +6,7 @@ struct AppSidebar: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 9)
-                        .fill(.blue.gradient)
-                    Image(systemName: "waveform.badge.magnifyingglass")
-                        .foregroundStyle(.white)
-                        .font(.system(size: 18, weight: .bold))
-                }
-                .frame(width: 36, height: 36)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("SeekSync").font(.headline)
-                    Text("PROTOTYPE").font(.system(size: 9, weight: .bold)).tracking(1.1).foregroundStyle(.secondary)
-                }
-                Spacer()
-            }
+            SeekSyncBrandHeader()
             .padding(14)
 
             List(selection: $model.selectedSection) {
@@ -51,10 +37,6 @@ struct AppSidebar: View {
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text(model.settings.executionMode == .simulate ? "Simulation mode · music files stay untouched" : "Live mode · previews require confirmation")
-                    .font(.system(size: 10))
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(12)
         }
@@ -213,39 +195,47 @@ struct PlaylistInspector: View {
                     }
                 }
 
-                HStack {
-                    Button {
-                        model.showSyncPreview(for: playlist)
-                    } label: {
-                        Label("Sync Now…", systemImage: "arrow.down.circle.fill")
-                            .frame(maxWidth: .infinity)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        syncButton
+                        dailySyncButton
                     }
-                    .buttonStyle(.borderedProminent)
-                    Button {
-                        model.togglePlan(for: playlist)
-                    } label: {
-                        Label(model.isInPool(playlist.id) ? "Daily sync on" : "Enable daily sync", systemImage: model.isInPool(playlist.id) ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath")
+                    VStack(spacing: 10) {
+                        syncButton
+                        dailySyncButton
                     }
-                    .buttonStyle(.bordered)
                 }
                 .controlSize(.large)
 
                 if playlist.trackCount > 0 {
                     GroupBox("Local coverage") {
                         VStack(alignment: .leading, spacing: 10) {
-                            HStack(alignment: .firstTextBaseline) {
-                                Text("\(playlist.localCount)").font(.title.bold())
-                                Text("of \(playlist.trackCount) indexed locally").foregroundStyle(.secondary)
-                                Spacer()
-                                Text("\(Int(playlist.coverage * 100))%").font(.headline.monospacedDigit())
+                            ViewThatFits(in: .horizontal) {
+                                HStack(alignment: .firstTextBaseline) {
+                                    Text("\(playlist.localCount)").font(.title.bold())
+                                    Text("of \(playlist.trackCount) indexed locally")
+                                        .foregroundStyle(.secondary)
+                                        .fixedSize(horizontal: true, vertical: false)
+                                    Spacer()
+                                    coveragePercent
+                                }
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack(alignment: .firstTextBaseline) {
+                                        Text("\(playlist.localCount) of \(playlist.trackCount)")
+                                            .font(.title.bold())
+                                        Spacer()
+                                        coveragePercent
+                                    }
+                                    Text("indexed locally")
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                             ProgressView(value: playlist.coverage)
                                 .accessibilityLabel("Local coverage for \(playlist.name)")
                                 .accessibilityValue("\(playlist.localCount) of \(playlist.trackCount) tracks available locally")
-                            HStack {
-                                if playlist.missingCount > 0 { StatusPill(text: "\(playlist.missingCount) missing", systemImage: "plus", tone: .orange) }
-                                if playlist.upgradeCandidates > 0 { StatusPill(text: "\(playlist.upgradeCandidates) below target", systemImage: "arrow.up", tone: .blue) }
-                                if playlist.needsReview > 0 { StatusPill(text: "\(playlist.needsReview) review", systemImage: "questionmark", tone: .red) }
+                            ViewThatFits(in: .horizontal) {
+                                HStack { coveragePills }
+                                VStack(alignment: .leading, spacing: 6) { coveragePills }
                             }
                         }
                         .padding(4)
@@ -254,10 +244,10 @@ struct PlaylistInspector: View {
 
                 GroupBox("Effective download policy") {
                     VStack(alignment: .leading, spacing: 10) {
-                        LabeledContent("Destination", value: model.settings.outputDirectory)
-                        LabeledContent("Target", value: model.settings.preferredFormatLabel)
-                        LabeledContent("YouTube fallback", value: effectiveYouTubeLabel)
-                        LabeledContent("Recheck", value: model.settings.lookForPreferredQuality ? "Files below preferred conditions" : "Missing files only")
+                        AdaptiveValueRow("Destination", value: model.settings.outputDirectory)
+                        AdaptiveValueRow("Target", value: model.settings.preferredFormatLabel)
+                        AdaptiveValueRow("YouTube fallback", value: effectiveYouTubeLabel)
+                        AdaptiveValueRow("Recheck", value: model.settings.lookForPreferredQuality ? "Files below preferred conditions" : "Missing files only")
                         Divider()
                         Text("“Preferred quality” is a technical target. Sockseek will revisit an indexed lossy file when FLAC is preferred, but it cannot judge mastering quality.")
                             .font(.caption)
@@ -289,12 +279,88 @@ struct PlaylistInspector: View {
         .background(.background.opacity(0.6))
     }
 
+    private var syncButton: some View {
+        Button {
+            model.showSyncPreview(for: playlist)
+        } label: {
+            Label("Sync Now…", systemImage: "arrow.down.circle.fill")
+                .lineLimit(1)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+    }
+
+    private var dailySyncButton: some View {
+        Button {
+            model.togglePlan(for: playlist)
+        } label: {
+            Label(
+                model.isInPool(playlist.id) ? "Daily sync on" : "Enable daily sync",
+                systemImage: model.isInPool(playlist.id) ? "checkmark.circle.fill" : "arrow.triangle.2.circlepath"
+            )
+            .lineLimit(1)
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+    }
+
+    private var coveragePercent: some View {
+        Text("\(Int(playlist.coverage * 100))%")
+            .font(.headline.monospacedDigit())
+    }
+
+    @ViewBuilder
+    private var coveragePills: some View {
+        if playlist.missingCount > 0 {
+            StatusPill(text: "\(playlist.missingCount) missing", systemImage: "plus", tone: .orange)
+        }
+        if playlist.upgradeCandidates > 0 {
+            StatusPill(text: "\(playlist.upgradeCandidates) below target", systemImage: "arrow.up", tone: .blue)
+        }
+        if playlist.needsReview > 0 {
+            StatusPill(text: "\(playlist.needsReview) review", systemImage: "questionmark", tone: .red)
+        }
+    }
+
     private var effectiveYouTubeLabel: String {
         switch model.plan(for: playlist.id)?.youtubePolicy ?? .inherit {
         case .allow: return "Allowed for this playlist"
         case .never: return "Disabled for this playlist"
         case .inherit: return model.settings.allowYouTubeFallback ? "Allowed by default" : "Disabled by default"
         }
+    }
+}
+
+private struct AdaptiveValueRow: View {
+    let label: String
+    let value: String
+
+    init(_ label: String, value: String) {
+        self.label = label
+        self.value = value
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text(label)
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
+                Text(value)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.trailing)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
