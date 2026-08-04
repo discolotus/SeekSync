@@ -27,7 +27,7 @@ struct SeekSyncPrototypeApp: App {
         Settings {
             SettingsScreen()
                 .environmentObject(model)
-                .frame(width: 680, height: 720)
+                .frame(width: 660, height: 560)
         }
     }
 }
@@ -62,6 +62,11 @@ struct RootPrototypeView: View {
             SyncPreviewSheet(pending: pending)
                 .environmentObject(model)
         }
+        .onChange(of: model.selectedPlaylistID) { _, playlistID in
+            if playlistID != nil {
+                inspectorPresented = true
+            }
+        }
         .overlay(alignment: .top) {
             if let toast = model.toastMessage {
                 ToastView(message: toast)
@@ -85,6 +90,8 @@ struct MenuBarStatusView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            SeekSyncBrandHeader(iconSize: 30)
+            Divider()
             if let run = model.activeRun {
                 Text(run.playlistName).font(.headline)
                 ActiveSyncProgressView(run: run, compact: true)
@@ -98,7 +105,6 @@ struct MenuBarStatusView: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            Divider()
             Button("Open SeekSync") {
                 if let existingWindow = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) {
                     existingWindow.makeKeyAndOrderFront(nil)

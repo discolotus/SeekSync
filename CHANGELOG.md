@@ -3,6 +3,15 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1] - 2026-08-04
+
+- Polish the responsive library and inspector layouts across compact and wide
+  windows while keeping sync mode and design controls accessible.
+- Restore reliable fresh-launch window creation and align the packaged app's
+  visible identity.
+- Add render coverage for supported layouts and sheets, plus updated visual QA
+  guidance and audit notes.
+
 ## [0.2.0] - 2026-08-04
 
 - Make confirmed manual syncs real for Spotify and pasted-URL playlists while
