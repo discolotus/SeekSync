@@ -39,7 +39,7 @@ mkdir -p "${output:h}"
     print -r -- '  homepage "https://github.com/discolotus/SeekSync"'
     print -r -- ''
     print -r -- '  depends_on arch: :arm64'
-    print -r -- '  depends_on macos: ">= :sonoma"'
+    print -r -- '  depends_on macos: :sonoma'
     print -r -- ''
     print -r -- '  app "SeekSync.app"'
     print -r -- ''

@@ -29,3 +29,7 @@ jobs:
           test "$(plutil -extract CFBundleIconFile raw 'dist/SeekSync.app/Contents/Info.plist')" = AppIcon
           cmp Resources/AppIcon.icns "dist/SeekSync.app/Contents/Resources/AppIcon.icns"
           iconutil -c iconset Resources/AppIcon.icns -o "$RUNNER_TEMP/AppIcon.iconset"
+          ruby -c dist/release/seeksync.rb
+          mkdir -p "$RUNNER_TEMP/homebrew-tap/Casks"
+          cp dist/release/seeksync.rb "$RUNNER_TEMP/homebrew-tap/Casks/seeksync.rb"
+          brew style "$RUNNER_TEMP/homebrew-tap/Casks/seeksync.rb"
