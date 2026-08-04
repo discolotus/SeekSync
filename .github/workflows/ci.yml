@@ -23,7 +23,10 @@ jobs:
           version=$(tr -d '[:space:]' < VERSION)
           archive="dist/release/SeekSync-${version}-arm64.zip"
           test -f "$archive"
-          shasum -a 256 -c "$archive.sha256"
+          (
+            cd dist/release
+            shasum -a 256 -c "SeekSync-${version}-arm64.zip.sha256"
+          )
           codesign --verify --deep --strict "dist/SeekSync.app"
           test "$(lipo -archs 'dist/SeekSync.app/Contents/MacOS/SeekSyncPrototype')" = arm64
           test "$(plutil -extract CFBundleIconFile raw 'dist/SeekSync.app/Contents/Info.plist')" = AppIcon

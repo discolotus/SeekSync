@@ -3,6 +3,11 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-08-03
+
+- Emit a portable release checksum that verifies after the ZIP and checksum
+  are downloaded together, without referencing a CI runner path.
+
 ## [0.1.2] - 2026-08-03
 
 - Generate the supported Homebrew macOS dependency declaration and validate
