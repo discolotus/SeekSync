@@ -1,0 +1,21 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    uses: discolotus/release-workflows/.github/workflows/release-macos-app.yml@v1
+    with:
+      app_name: SeekSync
+      test_command: make test
+      package_command: make release
+      artifact_path: dist/release/SeekSync-{version}-arm64.zip
+      cask_path: dist/release/seeksync.rb
+      runner: macos-15
+      prerelease: true
+      allow_initial: true

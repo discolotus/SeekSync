@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test
+        run: make test
+      - name: Package release
+        run: make release
+      - name: Verify package
+        run: |
+          version=$(tr -d '[:space:]' < VERSION)
+          archive="dist/release/SeekSync-${version}-arm64.zip"
+          test -f "$archive"
+          shasum -a 256 -c "$archive.sha256"
+          codesign --verify --deep --strict "dist/SeekSync.app"
+          test "$(lipo -archs 'dist/SeekSync.app/Contents/MacOS/SeekSyncPrototype')" = arm64
+          test "$(plutil -extract CFBundleIconFile raw 'dist/SeekSync.app/Contents/Info.plist')" = AppIcon
+          cmp Resources/AppIcon.icns "dist/SeekSync.app/Contents/Resources/AppIcon.icns"
+          iconutil -c iconset Resources/AppIcon.icns -o "$RUNNER_TEMP/AppIcon.iconset"
