@@ -93,10 +93,14 @@ private struct RunDetailView: View {
                 Text(run.phase.rawValue.uppercased()).font(.caption.bold()).tracking(1).foregroundStyle(.secondary)
                 Text(run.playlistName).font(.title2.bold())
                 Text(run.message).foregroundStyle(.secondary)
-                ProgressView(value: run.progress)
-                    .accessibilityLabel("Sync progress for \(run.playlistName)")
-                    .accessibilityValue("\(Int(run.progress * 100)) percent")
-                RunCountsView(counts: run.counts)
+                if run.phase.isActive {
+                    ActiveSyncProgressView(run: run)
+                } else {
+                    ProgressView(value: run.progress)
+                        .accessibilityLabel("Sync progress for \(run.playlistName)")
+                        .accessibilityValue("\(Int(run.progress * 100)) percent")
+                    RunCountsView(counts: run.counts)
+                }
                 Divider()
                 Text("Sanitized command").font(.caption.bold()).foregroundStyle(.secondary)
                 Text(run.commandPreview)

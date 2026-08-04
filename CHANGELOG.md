@@ -3,6 +3,15 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.0] - 2026-08-04
+
+- Make confirmed manual syncs real for Spotify and pasted-URL playlists while
+  keeping bundled demo playlists preview-only.
+- Show the active track number, artist, title, search/download phase,
+  byte-level download progress, completed count, synced count, already-local
+  count, failures, and review count while Sockseek is running.
+- Preserve the separate explicit arm control for unattended daily downloads.
+
 ## [0.1.3] - 2026-08-03
 
 - Emit a portable release checksum that verifies after the ZIP and checksum

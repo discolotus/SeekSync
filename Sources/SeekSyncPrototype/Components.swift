@@ -214,6 +214,103 @@ struct RunCountsView: View {
     }
 }
 
+struct ActiveSyncProgressView: View {
+    let run: SyncRun
+    var compact = false
+
+    var body: some View {
+        if let details = run.progressDetails {
+            VStack(alignment: .leading, spacing: compact ? 6 : 10) {
+                HStack {
+                    Text(trackPosition(details))
+                        .font(compact ? .caption.bold() : .callout.bold())
+                    Spacer()
+                    if let track = details.currentTrack {
+                        StatusPill(
+                            text: track.activity.rawValue,
+                            systemImage: track.activity == .downloading ? "arrow.down.circle.fill" : "magnifyingglass",
+                            tone: .blue
+                        )
+                    }
+                }
+
+                if let track = details.currentTrack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(track.title)
+                            .font(compact ? .caption.weight(.semibold) : .headline)
+                            .lineLimit(1)
+                        Text(track.artist)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+
+                    if track.activity == .downloading, let fraction = track.downloadFraction {
+                        ProgressView(value: fraction)
+                            .tint(.blue)
+                            .accessibilityLabel("Download progress for \(track.artist), \(track.title)")
+                            .accessibilityValue("\(Int(fraction * 100)) percent")
+                        Text(downloadLabel(track))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+
+                ProgressView(value: details.playlistFraction)
+                    .accessibilityLabel("Playlist sync progress for \(run.playlistName)")
+                    .accessibilityValue("\(details.completedTracks) of \(details.totalTracks) tracks finished")
+
+                HStack(spacing: compact ? 8 : 14) {
+                    metric("\(details.completedTracks)/\(details.totalTracks)", "Finished")
+                    metric("\(run.counts.added + run.counts.upgraded)", "Synced")
+                    metric("\(run.counts.alreadyBest)", "Already local")
+                    metric("\(run.counts.unavailable)", "Failed")
+                    if !compact || run.counts.needsReview > 0 {
+                        metric("\(run.counts.needsReview)", "Review")
+                    }
+                }
+            }
+        } else {
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: run.progress)
+                    .accessibilityLabel("Sync progress for \(run.playlistName)")
+                    .accessibilityValue("\(Int(run.progress * 100)) percent")
+                Text(run.message).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func trackPosition(_ details: SyncProgressSnapshot) -> String {
+        if let position = details.currentTrack?.position {
+            return "Track \(position) of \(details.totalTracks)"
+        }
+        return "\(details.completedTracks) of \(details.totalTracks) tracks finished"
+    }
+
+    private func downloadLabel(_ track: CurrentTrackProgress) -> String {
+        if let transferred = track.bytesTransferred, let total = track.totalBytes {
+            return "\(Self.byteFormatter.string(fromByteCount: transferred)) of \(Self.byteFormatter.string(fromByteCount: total))"
+        }
+        if let fraction = track.downloadFraction { return "\(Int(fraction * 100))% downloaded" }
+        return "Download started"
+    }
+
+    private func metric(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(value).font(.caption.bold().monospacedDigit())
+            Text(label).font(.system(size: compact ? 8 : 9)).foregroundStyle(.secondary)
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private static let byteFormatter: ByteCountFormatter = {
+        let formatter = ByteCountFormatter()
+        formatter.countStyle = .file
+        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        return formatter
+    }()
+}
+
 struct ToastView: View {
     let message: String
 
