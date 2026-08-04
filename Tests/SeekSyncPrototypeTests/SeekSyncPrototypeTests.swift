@@ -413,6 +413,45 @@ final class SockseekCommandBuilderTests: XCTestCase {
 }
 
 final class SockseekProgressParserTests: XCTestCase {
+    func testReportsCurrentTrackAndByteLevelDownloadProgress() {
+        var tracker = SockseekProgressTracker()
+
+        tracker.consume(#"{"type":"track_list","data":{"total":2,"tracks":[{"index":0,"artist":"Artist One","title":"First Song","lifecycleState":"Pending","terminalOutcome":"None","skipReason":"None"},{"index":1,"artist":"Artist Two","title":"Second Song","lifecycleState":"Pending","terminalOutcome":"None","skipReason":"None"}]}}"#)
+        tracker.consume(#"{"type":"search_start","data":{"artist":"Artist One","title":"First Song"}}"#)
+
+        XCTAssertEqual(tracker.snapshot.totalTracks, 2)
+        XCTAssertEqual(tracker.snapshot.completedTracks, 0)
+        XCTAssertEqual(tracker.snapshot.currentTrack?.position, 1)
+        XCTAssertEqual(tracker.snapshot.currentTrack?.artist, "Artist One")
+        XCTAssertEqual(tracker.snapshot.currentTrack?.title, "First Song")
+        XCTAssertEqual(tracker.snapshot.currentTrack?.activity, .searching)
+
+        tracker.consume(#"{"type":"download_start","data":{"artist":"Artist One","title":"First Song","size":1000}}"#)
+        tracker.consume(#"{"type":"download_progress","data":{"bytesTransferred":425,"totalBytes":1000,"percent":42.5}}"#)
+
+        XCTAssertEqual(tracker.snapshot.currentTrack?.activity, .downloading)
+        XCTAssertEqual(tracker.snapshot.currentTrack?.bytesTransferred, 425)
+        XCTAssertEqual(tracker.snapshot.currentTrack?.totalBytes, 1000)
+        XCTAssertEqual(tracker.snapshot.currentTrack?.downloadFraction ?? 0, 0.425, accuracy: 0.0001)
+    }
+
+    func testCountsCompletedAndFailedTracksWhileAdvancingCurrentSong() {
+        var tracker = SockseekProgressTracker()
+        tracker.consume(#"{"type":"track_list","data":{"total":2,"tracks":[{"index":0,"artist":"Artist One","title":"First Song","lifecycleState":"Pending","terminalOutcome":"None","skipReason":"None"},{"index":1,"artist":"Artist Two","title":"Second Song","lifecycleState":"Pending","terminalOutcome":"None","skipReason":"None"}]}}"#)
+        tracker.consume(#"{"type":"track_state","data":{"artist":"Artist One","title":"First Song","lifecycleState":"Terminal","terminalOutcome":"Succeeded","skipReason":"None"}}"#)
+        tracker.consume(#"{"type":"search_start","data":{"artist":"Artist Two","title":"Second Song"}}"#)
+
+        XCTAssertEqual(tracker.snapshot.completedTracks, 1)
+        XCTAssertEqual(tracker.snapshot.currentTrack?.position, 2)
+        XCTAssertEqual(tracker.counts.added, 1)
+
+        tracker.consume(#"{"type":"track_state","data":{"artist":"Artist Two","title":"Second Song","lifecycleState":"Terminal","terminalOutcome":"Failed","skipReason":"None"}}"#)
+
+        XCTAssertEqual(tracker.snapshot.completedTracks, 2)
+        XCTAssertNil(tracker.snapshot.currentTrack)
+        XCTAssertEqual(tracker.counts.unavailable, 1)
+    }
+
     @MainActor
     func testCountsTerminalOutcomesFromV3JSON() {
         let output = """
@@ -437,6 +476,26 @@ final class SockseekProgressParserTests: XCTestCase {
         XCTAssertEqual(counts.alreadyBest, 1)
         XCTAssertEqual(counts.unavailable, 1)
         XCTAssertEqual(counts.needsReview, 0)
+    }
+}
+
+final class SyncExecutionKindTests: XCTestCase {
+    func testRealPlaylistsRunSockseekAndFixturesRemainPreviewOnly() {
+        var realPlaylist = Playlist.samples[0]
+        realPlaylist.isFixture = false
+
+        XCTAssertEqual(realPlaylist.executionKind, .sockseek)
+        XCTAssertEqual(Playlist.samples[0].executionKind, .previewOnly)
+    }
+}
+
+final class SpotifyConnectionStateTests: XCTestCase {
+    func testCachedRealCatalogIsNotLabeledAsDemoData() {
+        XCTAssertEqual(
+            SpotifyConnectionState.cached(count: 575).label,
+            "Spotify catalog · 575 playlists"
+        )
+        XCTAssertEqual(SpotifyConnectionState.cached(count: 1).label, "Spotify catalog · 1 playlist")
     }
 }
 

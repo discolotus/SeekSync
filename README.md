@@ -40,9 +40,12 @@ For Xcode, open `Package.swift`, select the **SeekSyncPrototype** scheme, and us
 - Automatic read-only Spotify Web API loading from credentials already present in the selected Sockseek config, plus a manual refresh action.
 - One-shot sync preview and an in-memory/persisted daily sync pool.
 - Exact argument-array command construction for Sockseek, including a stable per-playlist index, streamed JSON progress, preferred-quality rechecks, and explicit YouTube fallback override.
-- Safe default simulation mode; manual live downloads require selecting **Run Sockseek** and confirming a preview. Unattended live scheduling has a second, explicit arm control.
+- Real Spotify and pasted-URL playlists start Sockseek only after an explicit sync preview confirmation. Built-in demo playlists remain preview-only, and unattended live scheduling has a second, explicit arm control.
 - Real Sockseek config reading and comment/order-preserving updates after an explicit save, with backup and external-change detection.
 - Activity history, dependency health, settings, and a menu-bar status surface.
+- Live per-track progress from Sockseek, including the current song, playlist
+  position, search/download phase, byte progress, completed tracks, failures,
+  and already-local tracks.
 - Live progress and result counts update the selected playlist's local-coverage state rather than leaving catalog playlists at zero after a run.
 - Spotify refreshes retain prior sync coverage, reconcile pasted URLs with catalog metadata, and reject partial or unsafe pagination chains.
 

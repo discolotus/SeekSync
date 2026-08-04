@@ -87,9 +87,9 @@ struct SyncPreviewSheet: View {
                         }
                         Spacer()
                         StatusPill(
-                            text: model.settings.executionMode.rawValue,
-                            systemImage: model.settings.executionMode == .simulate ? "sparkles" : "arrow.down.circle.fill",
-                            tone: model.settings.executionMode == .simulate ? .blue : .orange
+                            text: pending.playlist.executionKind == .sockseek ? "Real sync" : "Demo preview",
+                            systemImage: pending.playlist.executionKind == .sockseek ? "arrow.down.circle.fill" : "eye.fill",
+                            tone: pending.playlist.executionKind == .sockseek ? .orange : .blue
                         )
                     }
 
@@ -125,12 +125,12 @@ struct SyncPreviewSheet: View {
                         .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
                     }
 
-                    if model.settings.executionMode == .live {
+                    if pending.playlist.executionKind == .sockseek {
                         Label("This will start a real Sockseek download process. Existing indexed files are skipped unless they miss the preferred conditions.", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange)
                             .font(.callout)
                     } else {
-                        Label("Simulation exercises the app flow and changes no music files.", systemImage: "checkmark.shield.fill")
+                        Label("Demo playlists are preview-only and never change music files.", systemImage: "checkmark.shield.fill")
                             .foregroundStyle(.blue)
                             .font(.callout)
                     }
@@ -148,7 +148,7 @@ struct SyncPreviewSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(model.settings.executionMode == .live ? "Start Sockseek" : "Run Simulation") {
+                Button(pending.playlist.executionKind == .sockseek ? "Start Sockseek" : "Run Demo Preview") {
                     model.confirmPendingSync()
                     dismiss()
                 }
@@ -165,10 +165,10 @@ struct SyncPreviewSheet: View {
 
     private var startBlocker: String? {
         if model.activeRun != nil { return "Another sync is already running." }
-        if model.settings.executionMode == .live, model.isConfigDirty {
+        if pending.playlist.executionKind == .sockseek, model.isConfigDirty {
             return "Save or reload the edited settings before starting a live run."
         }
-        if model.settings.executionMode == .live, !model.dependencyState.isReady {
+        if pending.playlist.executionKind == .sockseek, !model.dependencyState.isReady {
             return "Sockseek 3 must be ready before a live run can start."
         }
         return nil

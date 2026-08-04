@@ -3,7 +3,7 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [0.1.4] - 2026-08-04
+## [0.2.1] - 2026-08-04
 
 - Polish the responsive library and inspector layouts across compact and wide
   windows while keeping sync mode and design controls accessible.
@@ -11,6 +11,15 @@ All notable changes to SeekSync are documented here. Versions follow
   visible identity.
 - Add render coverage for supported layouts and sheets, plus updated visual QA
   guidance and audit notes.
+
+## [0.2.0] - 2026-08-04
+
+- Make confirmed manual syncs real for Spotify and pasted-URL playlists while
+  keeping bundled demo playlists preview-only.
+- Show the active track number, artist, title, search/download phase,
+  byte-level download progress, completed count, synced count, already-local
+  count, failures, and review count while Sockseek is running.
+- Preserve the separate explicit arm control for unattended daily downloads.
 
 ## [0.1.3] - 2026-08-03
 

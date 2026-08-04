@@ -8,12 +8,6 @@ struct PendingSync: Identifiable {
     var youtubePolicy: YouTubePolicy
 }
 
-private struct LiveRunProgress {
-    var total = 0
-    var terminal = 0
-    var counts = RunCounts()
-}
-
 @MainActor
 final class AppModel: ObservableObject {
     @Published var selectedSection: AppSection = .playlists
@@ -44,7 +38,7 @@ final class AppModel: ObservableObject {
     private let persistence = PrototypePersistence()
     private var schedulerCancellable: AnyCancellable?
     private var activeRunTask: Task<Void, Never>?
-    private var liveRunProgress: [UUID: LiveRunProgress] = [:]
+    private var liveRunProgress: [UUID: SockseekProgressTracker] = [:]
 
     init() {
         let restored = try? persistence.load()
@@ -61,6 +55,9 @@ final class AppModel: ObservableObject {
             return interrupted
         }
         self.settings = restored?.settings ?? ClientSettings()
+        if !self.liveSpotifyPlaylists.isEmpty {
+            self.spotifyState = .cached(count: self.liveSpotifyPlaylists.count)
+        }
 
         let autoDetectedConfig = ConfigStore.detectedConfigURL()
         let restoredConfigPath = NSString(string: settings.configPath).expandingTildeInPath
@@ -85,7 +82,6 @@ final class AppModel: ObservableObject {
             settings = loaded.settings
             settings.dailyHour = prototypeOnly.dailyHour
             settings.dailyMinute = prototypeOnly.dailyMinute
-            settings.executionMode = prototypeOnly.executionMode
             settings.liveSchedulingArmed = prototypeOnly.liveSchedulingArmed
             configDocument = loaded.document
             configRevision = loaded.revision
@@ -294,7 +290,6 @@ final class AppModel: ObservableObject {
             settings = loaded.settings
             settings.dailyHour = prototypeOnly.dailyHour
             settings.dailyMinute = prototypeOnly.dailyMinute
-            settings.executionMode = prototypeOnly.executionMode
             settings.liveSchedulingArmed = prototypeOnly.liveSchedulingArmed
             configDocument = loaded.document
             configRevision = loaded.revision
@@ -351,14 +346,14 @@ final class AppModel: ObservableObject {
 
     func tickScheduler(now: Date = Date()) {
         guard activeRun == nil else { return }
-        if settings.executionMode == .live {
-            guard settings.isLiveSchedulingArmed, dependencyState.isReady, !isConfigDirty else { return }
-        }
         let due = plans
             .filter { $0.enabled && $0.nextRunAt <= now }
             .compactMap { plan in playlist(for: plan).map { (plan, $0) } }
             .sorted { $0.0.nextRunAt < $1.0.nextRunAt }
         guard let (plan, playlist) = due.first else { return }
+        if playlist.executionKind == .sockseek {
+            guard settings.isLiveSchedulingArmed, dependencyState.isReady, !isConfigDirty else { return }
+        }
         startSync(playlist: playlist, trigger: .scheduled, youtubePolicy: plan.youtubePolicy)
     }
 
@@ -372,7 +367,6 @@ final class AppModel: ObservableObject {
         spotifyCatalogLoaded = false
         plans = Self.samplePlans
         runs = Self.sampleRuns
-        settings.executionMode = .simulate
         settings.liveSchedulingArmed = false
         selectedPlaylistID = allPlaylists.first?.id
         spotifyState = .demo
@@ -385,12 +379,6 @@ final class AppModel: ObservableObject {
             plans[index].nextRunAt = nextDailyRun(after: Date())
         }
         if persist() { toastMessage = "Prototype preferences and daily run times saved." }
-    }
-
-    func setExecutionMode(_ mode: ExecutionMode) {
-        settings.executionMode = mode
-        if mode == .simulate { settings.liveSchedulingArmed = false }
-        persist()
     }
 
     func setBinaryPath(_ path: String) {
@@ -432,7 +420,7 @@ final class AppModel: ObservableObject {
     }
 
     func setLiveSchedulingArmed(_ armed: Bool) {
-        if armed, (settings.executionMode != .live || !dependencyState.isReady) {
+        if armed, !dependencyState.isReady {
             toastMessage = "Sockseek 3 must be ready before daily live downloads can be armed."
             return
         }
@@ -453,19 +441,11 @@ final class AppModel: ObservableObject {
             toastMessage = "A sync is already running. SeekSync serializes jobs to protect the Soulseek session."
             return
         }
-        if settings.executionMode == .live, playlist.isFixture == true {
-            if trigger == .scheduled, let index = plans.firstIndex(where: { $0.playlistID == playlist.id }) {
-                plans[index].enabled = false
-                persist()
-            }
-            toastMessage = "Prototype fixture playlists cannot start live downloads. Add or refresh a real playlist first."
-            return
-        }
-        if settings.executionMode == .live, !dependencyState.isReady {
+        if playlist.executionKind == .sockseek, !dependencyState.isReady {
             toastMessage = "Sockseek 3 must be ready before a live run can start."
             return
         }
-        if settings.executionMode == .live, isConfigDirty {
+        if playlist.executionKind == .sockseek, isConfigDirty {
             toastMessage = "Save or reload the edited settings before starting a live run."
             return
         }
@@ -479,15 +459,15 @@ final class AppModel: ObservableObject {
         runs.insert(run, at: 0)
         persist()
 
-        switch settings.executionMode {
-        case .simulate:
-            activeRunTask = Task { [weak self] in await self?.simulateRun(runID: run.id, playlist: playlist) }
-        case .live:
+        switch playlist.executionKind {
+        case .previewOnly:
+            activeRunTask = Task { [weak self] in await self?.previewDemoRun(runID: run.id, playlist: playlist) }
+        case .sockseek:
             activeRunTask = Task { [weak self] in await self?.executeRun(runID: run.id, playlist: playlist, command: command) }
         }
     }
 
-    private func simulateRun(runID: UUID, playlist: Playlist) async {
+    private func previewDemoRun(runID: UUID, playlist: Playlist) async {
         let stages: [(RunPhase, Double, String)] = [
             (.refreshing, 0.12, "Reading playlist metadata"),
             (.searching, 0.35, "Checking the stable index and preferred format"),
@@ -513,7 +493,7 @@ final class AppModel: ObservableObject {
                 unavailable: playlist.missingCount > 2 ? playlist.missingCount - 2 : 0,
                 needsReview: playlist.needsReview
             )
-            finishRun(runID, phase: counts.unavailable + counts.needsReview > 0 ? .partial : .completed, counts: counts, message: "Simulation complete — no files were changed")
+            finishRun(runID, phase: counts.unavailable + counts.needsReview > 0 ? .partial : .completed, counts: counts, message: "Demo preview complete — no files were changed")
         } catch is CancellationError {
             finishRun(runID, phase: .cancelled, counts: RunCounts(), message: "Cancelled by user")
         } catch {
@@ -522,7 +502,7 @@ final class AppModel: ObservableObject {
     }
 
     private func executeRun(runID: UUID, playlist: Playlist, command: SLDLCommand) async {
-        liveRunProgress[runID] = LiveRunProgress()
+        liveRunProgress[runID] = SockseekProgressTracker()
         updateRun(runID) {
             $0.phase = .searching
             $0.progress = 0.08
@@ -562,50 +542,26 @@ final class AppModel: ObservableObject {
     }
 
     private func consumeSockseekOutput(_ chunk: String, runID: UUID) {
-        var state = liveRunProgress[runID] ?? LiveRunProgress()
-        let decoder = JSONDecoder()
-
-        for line in chunk.split(whereSeparator: \.isNewline) {
-            guard let data = line.data(using: .utf8),
-                  let event = try? decoder.decode(SockseekProgressEvent.self, from: data) else { continue }
-
-            switch event.type {
-            case "track_list":
-                state.total = max(event.data?.total ?? 0, state.total)
-                for track in event.data?.tracks ?? [] {
-                    guard let delta = Self.terminalCounts(
-                        lifecycleState: track.lifecycleState,
-                        terminalOutcome: track.terminalOutcome,
-                        skipReason: track.skipReason
-                    ) else { continue }
-                    state.terminal += 1
-                    state.counts.add(delta)
-                }
-            case "track_state":
-                guard let delta = Self.terminalCounts(
-                    lifecycleState: event.data?.lifecycleState,
-                    terminalOutcome: event.data?.terminalOutcome,
-                    skipReason: event.data?.skipReason
-                ) else { continue }
-                state.terminal += 1
-                state.counts.add(delta)
-            default:
-                continue
-            }
-        }
+        var state = liveRunProgress[runID] ?? SockseekProgressTracker()
+        state.consume(chunk)
 
         liveRunProgress[runID] = state
-        let total = max(state.total, state.terminal)
-        let fraction = total > 0 ? Double(state.terminal) / Double(total) : 0
+        let snapshot = state.snapshot
         updateRun(runID) {
-            $0.phase = state.terminal > 0 ? .downloading : .searching
-            $0.progress = min(0.9, 0.12 + (0.76 * fraction))
+            $0.phase = snapshot.currentTrack?.activity == .downloading ? .downloading : .searching
+            $0.progress = snapshot.playlistFraction
             $0.counts = state.counts
-            if total > 0 {
-                $0.message = state.terminal == total
-                    ? "Verifying \(total) track results"
-                    : "\(state.terminal) of \(total) tracks finished"
-                if state.terminal == total { $0.phase = .verifying }
+            $0.progressDetails = snapshot
+            if snapshot.totalTracks > 0 {
+                if snapshot.completedTracks == snapshot.totalTracks {
+                    $0.message = "Verifying \(snapshot.totalTracks) track results"
+                    $0.phase = .verifying
+                } else if let track = snapshot.currentTrack {
+                    let position = track.position.map { "Track \($0) of \(snapshot.totalTracks)" } ?? "Current track"
+                    $0.message = "\(position) · \(track.activity.rawValue): \(track.artist) — \(track.title)"
+                } else {
+                    $0.message = "\(snapshot.completedTracks) of \(snapshot.totalTracks) tracks finished"
+                }
             } else {
                 $0.message = "Reading playlist tracks"
             }
@@ -717,7 +673,7 @@ final class AppModel: ObservableObject {
         return counts
     }
 
-    private static func terminalCounts(
+    nonisolated static func terminalCounts(
         lifecycleState: String?,
         terminalOutcome: String?,
         skipReason: String?
@@ -781,26 +737,7 @@ final class AppModel: ObservableObject {
     ]
 }
 
-private struct SockseekProgressEvent: Decodable {
-    let type: String
-    let data: SockseekProgressData?
-}
-
-private struct SockseekProgressData: Decodable {
-    let total: Int?
-    let tracks: [SockseekTrackProgress]?
-    let lifecycleState: String?
-    let terminalOutcome: String?
-    let skipReason: String?
-}
-
-private struct SockseekTrackProgress: Decodable {
-    let lifecycleState: String?
-    let terminalOutcome: String?
-    let skipReason: String?
-}
-
-private extension RunCounts {
+extension RunCounts {
     mutating func add(_ other: RunCounts) {
         added += other.added
         upgraded += other.upgraded
@@ -849,7 +786,6 @@ private extension ClientSettings {
         var merged = self
         merged.dailyHour = other.dailyHour
         merged.dailyMinute = other.dailyMinute
-        merged.executionMode = other.executionMode
         merged.liveSchedulingArmed = other.liveSchedulingArmed
         return merged
     }

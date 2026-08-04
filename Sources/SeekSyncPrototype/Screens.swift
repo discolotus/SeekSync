@@ -37,6 +37,10 @@ struct AppSidebar: View {
                         .foregroundStyle(.red)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+                Text(model.spotifyCatalogLoaded ? "Real playlists · syncs require confirmation" : "Demo catalog · preview only")
+                    .font(.system(size: 10))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(12)
         }
@@ -64,7 +68,7 @@ struct AppSidebar: View {
 
     private var spotifyTone: StatusPill.Tone {
         switch model.spotifyState {
-        case .connected: return .green
+        case .connected, .cached: return .green
         case .failed: return .red
         default: return .neutral
         }
@@ -98,15 +102,38 @@ struct PlaylistLibraryScreen: View {
                     }
                 }
                 if !model.spotifyCatalogLoaded {
-                    Label("Demo data · \(modeLabel) — connect or refresh Spotify to replace these sample playlists.", systemImage: "testtube.2")
+                    Label("Demo data · preview only — connect or refresh Spotify to replace these sample playlists.", systemImage: "testtube.2")
                         .font(.caption)
-                        .foregroundStyle(model.settings.executionMode == .simulate ? Color.secondary : Color.orange)
-                        .accessibilityLabel("Demo data. \(modeLabel). Sample playlists are currently visible.")
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Demo data. Preview only. Sample playlists are currently visible.")
+                }
+                if let activeRun = model.activeRun {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Label("Syncing \(activeRun.playlistName)", systemImage: "arrow.down.circle.fill")
+                                .font(.headline)
+                                .foregroundStyle(.blue)
+                            Spacer()
+                            Button("Cancel") { model.cancelActiveRun() }
+                                .controlSize(.small)
+                        }
+                        ActiveSyncProgressView(run: activeRun)
+                    }
+                    .padding(12)
+                    .background(Color.blue.opacity(0.07), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.blue.opacity(0.2))
+                    }
+                    .accessibilityElement(children: .contain)
                 }
                 HStack {
                     TextField("Search playlists", text: $model.searchText)
                         .textFieldStyle(.roundedBorder)
-                    StatusPill(text: "\(model.allPlaylists.count) playlists", systemImage: nil)
+                    StatusPill(
+                        text: "\(model.allPlaylists.count) \(model.allPlaylists.count == 1 ? "playlist" : "playlists")",
+                        systemImage: nil
+                    )
                 }
             }
             .padding(20)
@@ -143,10 +170,6 @@ struct PlaylistLibraryScreen: View {
             detail: "Pick a playlist, run it once, or keep it synced daily."
         )
         .fixedSize(horizontal: false, vertical: true)
-    }
-
-    private var modeLabel: String {
-        model.settings.executionMode == .simulate ? "Simulation mode" : "Live mode"
     }
 
     private func refreshButton(labelStyle: Bool) -> some View {
@@ -494,10 +517,7 @@ struct RunRow: View {
                 }
             }
             if run.phase.isActive {
-                ProgressView(value: run.progress)
-                    .accessibilityLabel("Sync progress for \(run.playlistName)")
-                    .accessibilityValue("\(Int(run.progress * 100)) percent")
-                Text(run.message).font(.caption).foregroundStyle(.secondary)
+                ActiveSyncProgressView(run: run)
             } else {
                 RunCountsView(counts: run.counts)
                 Text(run.message).font(.caption).foregroundStyle(.secondary)
@@ -685,19 +705,13 @@ struct SettingsScreen: View {
                             Stepper("Hour: \(model.settings.dailyHour)", value: $model.settings.dailyHour, in: 0...23)
                             Stepper("Minute: \(model.settings.dailyMinute)", value: $model.settings.dailyMinute, in: 0...59, step: 5)
                         }
-                        Picker("Manual execution", selection: executionModeBinding) {
-                            ForEach(ExecutionMode.allCases) { Text($0.rawValue).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        Text(model.settings.executionMode == .simulate
-                             ? "Safe default: scheduled and manual runs are simulated."
-                             : "Manual previews can start real Sockseek processes. Unattended daily downloads stay disarmed until separately confirmed below.")
+                        Text("Manual sync previews for real playlists start Sockseek after confirmation. Unattended daily downloads stay disarmed until separately confirmed below.")
                             .font(.caption)
-                            .foregroundStyle(model.settings.executionMode == .live ? .orange : .secondary)
+                            .foregroundStyle(.secondary)
                         Text("Closing the main window is fine because the menu-bar item keeps the app alive. Quitting stops this prototype scheduler.")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle("Arm unattended daily live downloads", isOn: liveArmBinding)
-                            .disabled(model.settings.executionMode != .live || !model.dependencyState.isReady)
+                            .disabled(!model.dependencyState.isReady)
                         Text(model.settings.isLiveSchedulingArmed
                              ? "Armed: due daily jobs may start without another preview while SeekSync is running."
                              : "Disarmed: daily live jobs will not start automatically.")
@@ -778,10 +792,6 @@ struct SettingsScreen: View {
         Binding(get: { model.settings.binaryPath }, set: { model.setBinaryPath($0) })
     }
 
-    private var executionModeBinding: Binding<ExecutionMode> {
-        Binding(get: { model.settings.executionMode }, set: { model.setExecutionMode($0) })
-    }
-
     private var liveArmBinding: Binding<Bool> {
         Binding(
             get: { model.settings.isLiveSchedulingArmed },
@@ -794,7 +804,7 @@ struct SettingsScreen: View {
 
     private var spotifyTone: StatusPill.Tone {
         switch model.spotifyState {
-        case .connected: return .green
+        case .connected, .cached: return .green
         case .failed: return .red
         case .loading: return .blue
         case .demo: return .neutral
