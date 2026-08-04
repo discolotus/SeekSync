@@ -14,7 +14,10 @@ RELEASE_VERSION="$version" "$repo_dir/scripts/package_app.sh"
 mkdir -p "$release_dir"
 rm -f "$archive" "$archive.sha256" "$cask"
 ditto -c -k --sequesterRsrc --keepParent "$app_dir" "$archive"
-shasum -a 256 "$archive" > "$archive.sha256"
+(
+    cd "$release_dir"
+    shasum -a 256 "${archive:t}" > "${archive:t}.sha256"
+)
 sha256=$(cut -d ' ' -f 1 < "$archive.sha256")
 "$repo_dir/scripts/generate_homebrew_cask.sh" \
     --version "$version" \
