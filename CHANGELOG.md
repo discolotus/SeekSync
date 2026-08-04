@@ -3,6 +3,11 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-08-03
+
+- Generate the supported Homebrew macOS dependency declaration and validate
+  cask syntax and style during pull-request CI.
+
 ## [0.1.1] - 2026-08-03
 
 - Update CI to the current GitHub Actions runtime while preserving the verified
