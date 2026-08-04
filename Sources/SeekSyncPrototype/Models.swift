@@ -203,6 +203,17 @@ struct Playlist: Identifiable, Hashable, Codable {
     ]
 }
 
+enum SyncExecutionKind: Equatable {
+    case previewOnly
+    case sockseek
+}
+
+extension Playlist {
+    var executionKind: SyncExecutionKind {
+        isFixture == true ? .previewOnly : .sockseek
+    }
+}
+
 enum PlaylistLibrary {
     struct RefreshResult {
         let catalog: [Playlist]
@@ -311,6 +322,7 @@ struct SyncRun: Identifiable, Hashable, Codable {
     var startedAt: Date
     var finishedAt: Date?
     var counts: RunCounts
+    var progressDetails: SyncProgressSnapshot?
     var message: String
     var commandPreview: String
 
@@ -324,6 +336,7 @@ struct SyncRun: Identifiable, Hashable, Codable {
         startedAt: Date = Date(),
         finishedAt: Date? = nil,
         counts: RunCounts = RunCounts(),
+        progressDetails: SyncProgressSnapshot? = nil,
         message: String = "Waiting to start",
         commandPreview: String
     ) {
@@ -336,6 +349,7 @@ struct SyncRun: Identifiable, Hashable, Codable {
         self.startedAt = startedAt
         self.finishedAt = finishedAt
         self.counts = counts
+        self.progressDetails = progressDetails
         self.message = message
         self.commandPreview = commandPreview
     }
@@ -362,13 +376,6 @@ enum AudioPreference: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-enum ExecutionMode: String, CaseIterable, Identifiable, Codable {
-    case simulate = "Simulation"
-    case live = "Run Sockseek"
-
-    var id: String { rawValue }
-}
-
 struct ClientSettings: Codable, Equatable {
     var binaryPath = ""
     var configPath = ""
@@ -381,7 +388,6 @@ struct ClientSettings: Codable, Equatable {
     var profileName = "playlist"
     var dailyHour = 2
     var dailyMinute = 0
-    var executionMode: ExecutionMode = .simulate
     var liveSchedulingArmed: Bool?
 
     var soulseekUsername = ""
@@ -435,6 +441,7 @@ enum DependencyState: Equatable {
 
 enum SpotifyConnectionState: Equatable {
     case demo
+    case cached(count: Int)
     case loading
     case connected(account: String)
     case failed(String)
@@ -442,6 +449,7 @@ enum SpotifyConnectionState: Equatable {
     var label: String {
         switch self {
         case .demo: return "Demo Spotify library"
+        case .cached(let count): return "Spotify catalog · \(count) \(count == 1 ? "playlist" : "playlists")"
         case .loading: return "Refreshing Spotify…"
         case .connected(let account): return "Spotify · \(account)"
         case .failed: return "Spotify needs attention"

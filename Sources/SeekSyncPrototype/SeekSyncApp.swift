@@ -45,8 +45,6 @@ struct RootPrototypeView: View {
         .background(Color(nsColor: .windowBackgroundColor))
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
-                executionModeLabel
-
                 Button {
                     inspectorPresented.toggle()
                 } label: {
@@ -79,18 +77,6 @@ struct RootPrototypeView: View {
         }
     }
 
-    private var executionModeLabel: some View {
-        HStack(spacing: 5) {
-            Image(systemName: model.settings.executionMode == .simulate ? "shield.fill" : "bolt.fill")
-            Text(model.settings.executionMode == .simulate ? "Simulation" : "Live")
-        }
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(model.settings.executionMode == .simulate ? Color.green : Color.orange)
-        .help(model.settings.executionMode == .simulate
-              ? "Simulation mode: music files stay untouched."
-              : "Live mode: confirmed previews can start Sockseek.")
-        .accessibilityLabel(model.settings.executionMode == .simulate ? "Simulation mode" : "Live mode")
-    }
 }
 
 struct MenuBarStatusView: View {
@@ -101,10 +87,7 @@ struct MenuBarStatusView: View {
         VStack(alignment: .leading, spacing: 10) {
             if let run = model.activeRun {
                 Text(run.playlistName).font(.headline)
-                ProgressView(value: run.progress)
-                    .accessibilityLabel("Sync progress for \(run.playlistName)")
-                    .accessibilityValue("\(Int(run.progress * 100)) percent")
-                Text(run.phase.rawValue).font(.caption).foregroundStyle(.secondary)
+                ActiveSyncProgressView(run: run, compact: true)
                 Button("Cancel Current Run") { model.cancelActiveRun() }
             } else {
                 Label("SeekSync is idle", systemImage: "checkmark.circle")
