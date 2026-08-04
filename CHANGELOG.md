@@ -3,6 +3,15 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.4] - 2026-08-04
+
+- Polish the responsive library and inspector layouts across compact and wide
+  windows while keeping sync mode and design controls accessible.
+- Restore reliable fresh-launch window creation and align the packaged app's
+  visible identity.
+- Add render coverage for supported layouts and sheets, plus updated visual QA
+  guidance and audit notes.
+
 ## [0.1.3] - 2026-08-03
 
 - Emit a portable release checksum that verifies after the ZIP and checksum
