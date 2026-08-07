@@ -1,4 +1,4 @@
-.PHONY: run test build icon app release
+.PHONY: run test build icon app release test-packaged-app
 
 SWIFT_CACHE = CLANG_MODULE_CACHE_PATH=$(CURDIR)/.build/module-cache SWIFTPM_MODULECACHE_OVERRIDE=$(CURDIR)/.build/module-cache
 
@@ -22,3 +22,6 @@ app:
 
 release:
 	./scripts/package_release.sh
+
+test-packaged-app:
+	./scripts/smoke_test_packaged_app.sh

@@ -10,5 +10,3 @@ permissions:
 jobs:
   validate:
     uses: discolotus/release-workflows/.github/workflows/validate-release.yml@v1
-    with:
-      allow_initial: true
