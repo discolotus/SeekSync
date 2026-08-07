@@ -3,6 +3,23 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] - 2026-08-07
+
+- Add a Track Inventory section that gathers every previewed track across all
+  playlists into one searchable, filterable list, so a song shared by three
+  playlists is one row. Each row states whether the file already exists on this
+  Mac and whether a playlist can link to it as it stands, with its path,
+  quality, and the playlists that want it. Read-only.
+- Cache the Sockseek index produced by a library-reuse preview so a repeated
+  preview of an unchanged library skips rebuilding the music-directory tag
+  index on both passes. The cache is keyed to the library folder, preferred
+  conditions, and a file-count/size/modification stamp of the library, so an
+  added, removed, or replaced file still forces a full pass.
+- Report library-preview progress, failures, and cancellations on the playlist
+  detail screen. Previously a preview that failed left no analysis behind and
+  its message was never rendered, so pressing "Preview Library Reuse" appeared
+  to do nothing.
+
 ## [0.4.0] - 2026-08-07
 
 - Write a combined rekordbox library, `SeekSync.rekordbox.xml`, beside the

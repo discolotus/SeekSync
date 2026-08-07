@@ -245,7 +245,7 @@ struct SockseekJobsFullParser {
     }
 }
 
-struct SockseekIndexEntry: Hashable {
+struct SockseekIndexEntry: Codable, Hashable {
     var path: String?
     var artist: String
     var album: String
@@ -453,6 +453,11 @@ struct LibraryReuseAnalyzer {
     private let jobsParser = SockseekJobsFullParser()
     private let qualityProbe = AudioFileQualityProbe()
     private let fileManager = FileManager.default
+    private let cache: LibraryPreviewIndexCache
+
+    init(cache: LibraryPreviewIndexCache = LibraryPreviewIndexCache()) {
+        self.cache = cache
+    }
 
     func analyze(
         playlist: Playlist,
@@ -511,9 +516,29 @@ struct LibraryReuseAnalyzer {
         } else {
             stableEntries = []
         }
-        if !stableEntries.isEmpty {
-            try writeIndexSnapshot(stableEntries, to: gatedIndex)
-            try writeIndexSnapshot(stableEntries, to: ungatedIndex)
+        // Preseeding the index lets Sockseek resolve a track without building
+        // its music-directory index, which is the expensive part of a preview:
+        // it reads tags from every file in the library, on both passes, for
+        // every playlist. The stamp ties the cache to the library contents.
+        let cacheKey = LibraryPreviewIndexCache.Key(
+            playlistID: playlist.id,
+            libraryPath: standardized(libraryPath),
+            preferredFormat: settings.preferredFormatValue,
+            minimumBitrateKbps: Int(settings.preferredMinBitrateConfigValue),
+            conditionFingerprint: conditionPolicy.fingerprint
+        )
+        let libraryStamp = LibraryScanStamp.make(libraryPath: libraryPath, fileManager: fileManager)
+        let cached = libraryStamp.flatMap { cache.load(key: cacheKey, stamp: $0) }
+        if cached != nil {
+            await onStage?("Reusing the cached library index from the last preview…")
+        }
+        let gatedSeed = seedEntries(stable: stableEntries, cached: cached?.gated ?? [])
+        let ungatedSeed = seedEntries(stable: stableEntries, cached: cached?.ungated ?? [])
+        if !gatedSeed.isEmpty {
+            try writeIndexSnapshot(gatedSeed, to: gatedIndex)
+        }
+        if !ungatedSeed.isEmpty {
+            try writeIndexSnapshot(ungatedSeed, to: ungatedIndex)
         }
 
         await onStage?("Checking which local tracks meet \(settings.preferredFormatLabel)…")
@@ -555,6 +580,14 @@ struct LibraryReuseAnalyzer {
             seeds: seeds,
             pass: "all-matches"
         )
+        if let libraryStamp {
+            cache.store(
+                key: cacheKey,
+                stamp: libraryStamp,
+                snapshot: LibraryPreviewIndexCache.Snapshot(gated: gated, ungated: ungated)
+            )
+        }
+
         let gatedEntries = EntryLookup(entries: gated).entries(for: seeds)
         let ungatedEntries = EntryLookup(entries: ungated).entries(for: seeds)
         let selectedPaths = Set(
@@ -751,6 +784,18 @@ struct LibraryReuseAnalyzer {
             localPath: nil,
             quality: nil
         )
+    }
+
+    /// Merges the cached preview rows with the stable index from real runs.
+    /// `EntryLookup` prefers the last matching row, so the stable index is
+    /// written last: what a completed sync recorded outranks a cached preview.
+    private func seedEntries(
+        stable: [SockseekIndexEntry],
+        cached: [SockseekIndexEntry]
+    ) -> [SockseekIndexEntry] {
+        guard !cached.isEmpty else { return stable }
+        let stableKeys = Set(stable.map(\.exactKey))
+        return cached.filter { !stableKeys.contains($0.exactKey) } + stable
     }
 
     private func contains(_ candidate: String, in root: String) -> Bool {

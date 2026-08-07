@@ -173,6 +173,12 @@ final class AppModel: ObservableObject {
         libraryAnalyses[playlistID]
     }
 
+    /// Distinct tracks the previews have examined, badged in the sidebar so the
+    /// inventory advertises that it has something to show.
+    var analyzedTrackCount: Int {
+        LibraryInventory(analyses: Array(libraryAnalyses.values)).entries.count
+    }
+
     func isLibraryAnalysisCurrent(_ analysis: PlaylistLibraryAnalysis, for playlist: Playlist) -> Bool {
         analysis.isCurrent(
             for: settings,

@@ -814,6 +814,438 @@ final class SockseekCommandBuilderTests: XCTestCase {
     }
 }
 
+@MainActor
+final class LibraryInventoryRenderTests: XCTestCase {
+    func testInventorySectionRendersTracksAcrossPlaylists() throws {
+        let stateDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SeekSyncInventoryRender-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: stateDirectory, withIntermediateDirectories: true)
+        defer {
+            unsetenv("SEEKSYNC_STATE_PATH")
+            try? FileManager.default.removeItem(at: stateDirectory)
+        }
+
+        var settings = ClientSettings()
+        settings.libraryReuseEnabled = true
+        settings.libraryDirectory = "/Users/example/Music/Library"
+        let state = PrototypeState(
+            importedPlaylists: [],
+            cachedSpotifyPlaylists: nil,
+            plans: [],
+            runs: [],
+            settings: settings,
+            libraryAnalyses: [
+                "late-night": Self.analysis(
+                    id: "late-night",
+                    name: "Late Night",
+                    tracks: [
+                        Self.track(1, "Radiohead", "Nude", .libraryBelowThreshold, "/Users/example/Music/Library/Radiohead/In Rainbows/Nude.mp3", 128),
+                        Self.track(2, "Boards of Canada", "Roygbiv", .libraryReference, "/Users/example/Music/Library/BoC/Roygbiv.flac", nil),
+                        Self.track(3, "Burial", "Archangel", .downloadRequired, nil, nil)
+                    ]
+                ),
+                "focus": Self.analysis(
+                    id: "focus",
+                    name: "Focus",
+                    tracks: [
+                        Self.track(1, "Boards of Canada", "Roygbiv", .libraryReference, "/Users/example/Music/Library/BoC/Roygbiv.flac", nil),
+                        Self.track(2, "Aphex Twin", "Xtal", .downloaded, "/Users/example/SeekSync/Xtal.mp3", 320),
+                        Self.track(3, "Autechre", "Gantz Graf", .unavailable, nil, nil)
+                    ]
+                )
+            ]
+        )
+        let stateURL = stateDirectory.appendingPathComponent("state.json")
+        try PrototypePersistence(url: stateURL).save(state)
+        setenv("SEEKSYNC_STATE_PATH", stateURL.path, 1)
+
+        let model = AppModel()
+        XCTAssertEqual(model.analyzedTrackCount, 5, "Roygbiv should collapse into a single row.")
+
+        let screen = LibraryInventoryScreen()
+            .environmentObject(model)
+            .frame(width: 980, height: 720)
+            .background(Color(nsColor: .windowBackgroundColor))
+        let png = try renderPNG(AnyView(screen), size: NSSize(width: 980, height: 720))
+        XCTAssertGreaterThan(png.count, 20_000)
+
+        if let outputPath = ProcessInfo.processInfo.environment["SEEKSYNC_VISUAL_QA_DIR"], !outputPath.isEmpty {
+            let outputDirectory = URL(fileURLWithPath: outputPath, isDirectory: true)
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+            try png.write(
+                to: outputDirectory.appendingPathComponent("implementation-track-inventory-980x720@2x.png"),
+                options: .atomic
+            )
+        }
+    }
+
+    private static func track(
+        _ position: Int,
+        _ artist: String,
+        _ title: String,
+        _ disposition: PlaylistTrackDisposition,
+        _ localPath: String?,
+        _ bitrate: Int?
+    ) -> PlaylistTrackRecord {
+        PlaylistTrackRecord(
+            seed: PlaylistTrackSeed(
+                position: position,
+                artist: artist,
+                title: title,
+                album: "Album",
+                lengthSeconds: 243
+            ),
+            disposition: disposition,
+            localPath: localPath,
+            quality: bitrate.map {
+                AudioFileQuality(
+                    format: "mp3",
+                    bitrateKbps: $0,
+                    sampleRateHz: 44_100,
+                    bitDepth: nil,
+                    durationSeconds: 243
+                )
+            }
+        )
+    }
+
+    private static func analysis(
+        id: String,
+        name: String,
+        tracks: [PlaylistTrackRecord]
+    ) -> PlaylistLibraryAnalysis {
+        PlaylistLibraryAnalysis(
+            playlistID: id,
+            playlistName: name,
+            analyzedAt: Date(timeIntervalSince1970: 1_780_000_000),
+            sourceLibraryPath: "/Users/example/Music/Library",
+            preferredFormat: "mp3",
+            minimumBitrateKbps: 256,
+            tracks: tracks,
+            basis: .preview
+        )
+    }
+
+    private func renderPNG(_ view: AnyView, size: NSSize) throws -> Data {
+        let hostingView = NSHostingView(rootView: view)
+        hostingView.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: size),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.isReleasedWhenClosed = false
+        window.backgroundColor = .windowBackgroundColor
+        window.contentView = hostingView
+        window.orderFront(nil)
+        window.layoutIfNeeded()
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.35))
+        hostingView.layoutSubtreeIfNeeded()
+        hostingView.displayIfNeeded()
+
+        guard let representation = hostingView.bitmapImageRepForCachingDisplay(in: hostingView.bounds) else {
+            throw XCTSkip("The renderer could not create a bitmap for the inventory screen.")
+        }
+        hostingView.cacheDisplay(in: hostingView.bounds, to: representation)
+        window.orderOut(nil)
+        guard let data = representation.representation(using: .png, properties: [:]) else {
+            throw XCTSkip("The renderer could not encode the inventory screen.")
+        }
+        return data
+    }
+}
+
+final class LibraryInventoryTests: XCTestCase {
+    private func track(
+        position: Int,
+        artist: String,
+        title: String,
+        disposition: PlaylistTrackDisposition,
+        localPath: String? = nil,
+        quality: AudioFileQuality? = nil
+    ) -> PlaylistTrackRecord {
+        PlaylistTrackRecord(
+            seed: PlaylistTrackSeed(
+                position: position,
+                artist: artist,
+                title: title,
+                album: "Album",
+                lengthSeconds: 200
+            ),
+            disposition: disposition,
+            localPath: localPath,
+            quality: quality
+        )
+    }
+
+    private func analysis(
+        id: String,
+        name: String,
+        tracks: [PlaylistTrackRecord],
+        analyzedAt: Date = Date(timeIntervalSince1970: 1_000)
+    ) -> PlaylistLibraryAnalysis {
+        PlaylistLibraryAnalysis(
+            playlistID: id,
+            playlistName: name,
+            analyzedAt: analyzedAt,
+            sourceLibraryPath: "/Music",
+            preferredFormat: "mp3",
+            minimumBitrateKbps: 256,
+            tracks: tracks
+        )
+    }
+
+    func testCollapsesATrackSharedByPlaylistsIntoOneRow() {
+        let inventory = LibraryInventory(analyses: [
+            analysis(id: "a", name: "Late Night", tracks: [
+                track(position: 1, artist: "Boards of Canada", title: "Roygbiv", disposition: .libraryReference, localPath: "/Music/roygbiv.flac")
+            ]),
+            analysis(id: "b", name: "Focus", tracks: [
+                track(position: 4, artist: "boards of canada", title: "  Roygbiv ", disposition: .libraryReference, localPath: "/Music/roygbiv.flac")
+            ])
+        ])
+
+        XCTAssertEqual(inventory.entries.count, 1)
+        let entry = try? XCTUnwrap(inventory.entries.first)
+        XCTAssertEqual(entry?.playlistNames, ["Focus", "Late Night"])
+        XCTAssertTrue(entry?.isSharedAcrossPlaylists == true)
+        XCTAssertEqual(entry?.availability, .referenced)
+        XCTAssertFalse(entry?.variesByPlaylist == true)
+        XCTAssertEqual(inventory.playlistCount, 2)
+    }
+
+    func testReportsTheMostUsableStateAndFlagsPlaylistsThatDisagree() throws {
+        let inventory = LibraryInventory(analyses: [
+            analysis(id: "a", name: "Strict", tracks: [
+                track(position: 1, artist: "Radiohead", title: "Nude", disposition: .libraryBelowThreshold, localPath: "/Music/nude.mp3")
+            ]),
+            analysis(id: "b", name: "Relaxed", tracks: [
+                track(
+                    position: 1,
+                    artist: "Radiohead",
+                    title: "Nude",
+                    disposition: .libraryReference,
+                    localPath: "/Music/nude.mp3",
+                    quality: AudioFileQuality(format: "mp3", bitrateKbps: 192, sampleRateHz: 44_100, bitDepth: nil, durationSeconds: 250)
+                )
+            ])
+        ])
+
+        let entry = try XCTUnwrap(inventory.entries.first)
+        XCTAssertEqual(entry.availability, .referenced)
+        XCTAssertTrue(entry.variesByPlaylist)
+        XCTAssertEqual(entry.localPath, "/Music/nude.mp3")
+        XCTAssertEqual(entry.quality?.bitrateKbps, 192)
+    }
+
+    func testCountsWhatIsAlreadyOwnedSeparatelyFromWhatMustBeDownloaded() {
+        let inventory = LibraryInventory(analyses: [
+            analysis(id: "a", name: "Mixed", tracks: [
+                track(position: 1, artist: "A", title: "Referenced", disposition: .libraryReference, localPath: "/Music/a.flac"),
+                track(position: 2, artist: "B", title: "Below", disposition: .libraryBelowThreshold, localPath: "/Music/b.mp3"),
+                track(position: 3, artist: "C", title: "Downloaded", disposition: .downloaded, localPath: "/Downloads/c.mp3"),
+                track(position: 4, artist: "D", title: "Missing", disposition: .downloadRequired),
+                track(position: 5, artist: "E", title: "Unresolved", disposition: .unknown)
+            ])
+        ])
+
+        XCTAssertEqual(inventory.alreadyOwnedCount, 3)
+        let counts = inventory.counts()
+        XCTAssertEqual(counts[.referenced], 1)
+        XCTAssertEqual(counts[.belowTarget], 1)
+        XCTAssertEqual(counts[.downloaded], 1)
+        XCTAssertEqual(counts[.missing], 1)
+        XCTAssertEqual(counts[.unavailable], 1)
+    }
+
+    func testListsOwnedButUnusableTracksBeforeSettledOnes() {
+        let inventory = LibraryInventory(analyses: [
+            analysis(id: "a", name: "Mixed", tracks: [
+                track(position: 1, artist: "A", title: "Referenced", disposition: .libraryReference, localPath: "/Music/a.flac"),
+                track(position: 2, artist: "B", title: "Below", disposition: .libraryBelowThreshold, localPath: "/Music/b.mp3"),
+                track(position: 3, artist: "C", title: "Missing", disposition: .downloadRequired)
+            ])
+        ])
+
+        XCTAssertEqual(
+            inventory.filtered(availability: nil, query: "").map(\.title),
+            ["Below", "Missing", "Referenced"]
+        )
+    }
+
+    func testFiltersByStateAndSearchesPathsAndPlaylistNames() {
+        let inventory = LibraryInventory(analyses: [
+            analysis(id: "a", name: "Late Night", tracks: [
+                track(position: 1, artist: "Aphex Twin", title: "Xtal", disposition: .libraryBelowThreshold, localPath: "/Music/Ambient Works/xtal.mp3"),
+                track(position: 2, artist: "Burial", title: "Archangel", disposition: .downloadRequired)
+            ])
+        ])
+
+        XCTAssertEqual(
+            inventory.filtered(availability: .belowTarget, query: "").map(\.title),
+            ["Xtal"]
+        )
+        XCTAssertEqual(
+            inventory.filtered(availability: nil, query: "ambient works").map(\.title),
+            ["Xtal"]
+        )
+        XCTAssertEqual(
+            inventory.filtered(availability: nil, query: "late night").count,
+            2
+        )
+        XCTAssertTrue(inventory.filtered(availability: .referenced, query: "").isEmpty)
+    }
+
+    func testEmptyAnalysesProduceAnEmptyInventory() {
+        let inventory = LibraryInventory(analyses: [])
+
+        XCTAssertTrue(inventory.entries.isEmpty)
+        XCTAssertEqual(inventory.playlistCount, 0)
+        XCTAssertNil(inventory.analyzedAt)
+        XCTAssertEqual(inventory.alreadyOwnedCount, 0)
+    }
+}
+
+final class LibraryPreviewIndexCacheTests: XCTestCase {
+    private var root: URL!
+    private var library: URL!
+    private var cache: LibraryPreviewIndexCache!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SeekSyncPreviewCache-\(UUID().uuidString)")
+        library = root.appendingPathComponent("library")
+        try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+        cache = LibraryPreviewIndexCache(directory: root.appendingPathComponent("cache"))
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    private func key(conditionFingerprint: String = "fingerprint") -> LibraryPreviewIndexCache.Key {
+        LibraryPreviewIndexCache.Key(
+            playlistID: "playlist",
+            libraryPath: library.path,
+            preferredFormat: "mp3",
+            minimumBitrateKbps: 256,
+            conditionFingerprint: conditionFingerprint
+        )
+    }
+
+    private func entry(path: String?, title: String, state: Int) -> SockseekIndexEntry {
+        SockseekIndexEntry(
+            path: path,
+            artist: "Artist",
+            album: "Album",
+            title: title,
+            lengthSeconds: 200,
+            state: state,
+            failureReason: 0
+        )
+    }
+
+    @discardableResult
+    private func addLibraryFile(named name: String) throws -> URL {
+        let url = library.appendingPathComponent(name)
+        try Data("audio".utf8).write(to: url)
+        return url
+    }
+
+    func testReusesStoredIndexWhileTheLibraryIsUnchanged() throws {
+        let file = try addLibraryFile(named: "track.mp3")
+        let stamp = try XCTUnwrap(LibraryScanStamp.make(libraryPath: library.path))
+        let snapshot = LibraryPreviewIndexCache.Snapshot(
+            gated: [entry(path: file.path, title: "Kept", state: 3)],
+            ungated: [entry(path: file.path, title: "Kept", state: 3)]
+        )
+
+        cache.store(key: key(), stamp: stamp, snapshot: snapshot)
+
+        XCTAssertEqual(cache.load(key: key(), stamp: stamp), snapshot)
+    }
+
+    func testAddedLibraryFileInvalidatesTheStoredIndex() throws {
+        let file = try addLibraryFile(named: "track.mp3")
+        let stamp = try XCTUnwrap(LibraryScanStamp.make(libraryPath: library.path))
+        cache.store(
+            key: key(),
+            stamp: stamp,
+            snapshot: LibraryPreviewIndexCache.Snapshot(
+                gated: [entry(path: file.path, title: "Kept", state: 3)],
+                ungated: []
+            )
+        )
+
+        try addLibraryFile(named: "newly-ripped.mp3")
+        let currentStamp = try XCTUnwrap(LibraryScanStamp.make(libraryPath: library.path))
+
+        XCTAssertNotEqual(currentStamp, stamp)
+        XCTAssertNil(cache.load(key: key(), stamp: currentStamp))
+    }
+
+    func testDifferentReuseConditionsDoNotShareAStoredIndex() throws {
+        let file = try addLibraryFile(named: "track.mp3")
+        let stamp = try XCTUnwrap(LibraryScanStamp.make(libraryPath: library.path))
+        cache.store(
+            key: key(),
+            stamp: stamp,
+            snapshot: LibraryPreviewIndexCache.Snapshot(
+                gated: [entry(path: file.path, title: "Kept", state: 3)],
+                ungated: []
+            )
+        )
+
+        XCTAssertNil(cache.load(key: key(conditionFingerprint: "stricter"), stamp: stamp))
+    }
+
+    func testDropsRowsWhoseFileDisappearedButKeepsUnresolvedRows() throws {
+        let kept = try addLibraryFile(named: "kept.mp3")
+        let removed = try addLibraryFile(named: "removed.mp3")
+        let stamp = try XCTUnwrap(LibraryScanStamp.make(libraryPath: library.path))
+        cache.store(
+            key: key(),
+            stamp: stamp,
+            snapshot: LibraryPreviewIndexCache.Snapshot(
+                gated: [
+                    entry(path: kept.path, title: "Kept", state: 3),
+                    entry(path: removed.path, title: "Removed", state: 3),
+                    entry(path: nil, title: "Never Found", state: 2)
+                ],
+                ungated: []
+            )
+        )
+
+        try FileManager.default.removeItem(at: removed)
+        // The stamp is deliberately the recorded one: this asserts the row
+        // filter, not the invalidation an actual removal would also trigger.
+        let loaded = try XCTUnwrap(cache.load(key: key(), stamp: stamp))
+
+        XCTAssertEqual(loaded.gated.map(\.title), ["Kept", "Never Found"])
+    }
+
+    func testExpiredEntriesAreNotReused() throws {
+        let file = try addLibraryFile(named: "track.mp3")
+        let stamp = try XCTUnwrap(LibraryScanStamp.make(libraryPath: library.path))
+        let storedAt = Date()
+        cache.store(
+            key: key(),
+            stamp: stamp,
+            snapshot: LibraryPreviewIndexCache.Snapshot(
+                gated: [entry(path: file.path, title: "Kept", state: 3)],
+                ungated: []
+            ),
+            now: storedAt
+        )
+
+        let expired = storedAt.addingTimeInterval(LibraryPreviewIndexCache.maximumAge + 1)
+        XCTAssertNil(cache.load(key: key(), stamp: stamp, now: expired))
+    }
+}
+
 final class LibraryReuseTests: XCTestCase {
     func testParsesJobsFullOutputInPlaylistOrder() {
         let output = """
@@ -1046,7 +1478,9 @@ final class LibraryReuseTests: XCTestCase {
 
         """.write(to: stableIndex, atomically: true, encoding: .utf8)
 
-        let analysis = try await LibraryReuseAnalyzer().analyze(playlist: playlist, settings: settings)
+        let cache = LibraryPreviewIndexCache(directory: root.appendingPathComponent("preview-index-cache"))
+        let analyzer = LibraryReuseAnalyzer(cache: cache)
+        let analysis = try await analyzer.analyze(playlist: playlist, settings: settings)
 
         XCTAssertEqual(analysis.tracks.map(\.disposition), [
             .libraryReference,
@@ -1064,10 +1498,33 @@ final class LibraryReuseTests: XCTestCase {
         XCTAssertNil(analysis.tracks[2].localPath)
         XCTAssertEqual(analysis.tracks[3].localPath, output.appendingPathComponent("already-downloaded.mp3").path)
 
+        // A second preview of an unchanged library must be served from the
+        // cached index without changing what it reports.
+        let cacheKey = LibraryPreviewIndexCache.Key(
+            playlistID: playlist.id,
+            libraryPath: library.resolvingSymlinksInPath().path,
+            preferredFormat: settings.preferredFormatValue,
+            minimumBitrateKbps: Int(settings.preferredMinBitrateConfigValue),
+            conditionFingerprint: LibraryReuseConditionPolicy(arguments: []).fingerprint
+        )
+        let stamp = try XCTUnwrap(LibraryScanStamp.make(libraryPath: library.path))
+        XCTAssertNotNil(cache.load(key: cacheKey, stamp: stamp), "The preview did not cache its index.")
+
+        var reusedStages: [String] = []
+        let cachedAnalysis = try await analyzer.analyze(playlist: playlist, settings: settings) { stage in
+            reusedStages.append(stage)
+        }
+        XCTAssertEqual(cachedAnalysis.tracks.map(\.disposition), analysis.tracks.map(\.disposition))
+        XCTAssertEqual(cachedAnalysis.tracks.map(\.localPath), analysis.tracks.map(\.localPath))
+        XCTAssertTrue(
+            reusedStages.contains { $0.localizedCaseInsensitiveContains("cached library index") },
+            "Expected the cached index to be reported to the user: \(reusedStages)"
+        )
+
         let advancedConditions = LibraryReuseConditionPolicy(
             arguments: ["--pref-max-bitrate", "200"]
         )
-        let stricterAnalysis = try await LibraryReuseAnalyzer().analyze(
+        let stricterAnalysis = try await analyzer.analyze(
             playlist: playlist,
             settings: settings,
             conditionPolicy: advancedConditions
@@ -1081,7 +1538,7 @@ final class LibraryReuseTests: XCTestCase {
         XCTAssertEqual(stricterAnalysis.conditionFingerprint, advancedConditions.fingerprint)
 
         do {
-            _ = try await LibraryReuseAnalyzer().analyze(
+            _ = try await analyzer.analyze(
                 playlist: playlist,
                 settings: settings,
                 conditionPolicy: LibraryReuseConditionPolicy(

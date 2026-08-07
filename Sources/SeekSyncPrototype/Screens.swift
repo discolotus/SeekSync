@@ -12,6 +12,7 @@ struct AppSidebar: View {
             List(selection: $model.selectedSection) {
                 Section("Library") {
                     sidebarRow(.playlists, badge: nil)
+                    sidebarRow(.inventory, badge: model.analyzedTrackCount)
                     sidebarRow(.batchSync, badge: model.queuedSyncCount)
                     sidebarRow(.syncPool, badge: model.plans.count)
                 }
@@ -506,12 +507,11 @@ struct PlaylistInspector: View {
                             LibraryReuseAnalysisSummaryCard(analysis: analysis) {
                                 showTrackList = true
                             }
-                            if let message = model.libraryAnalysisMessages[playlist.id],
-                               !model.isAnalyzingLibrary(for: playlist.id) {
-                                Label(message, systemImage: message.localizedCaseInsensitiveContains("but") ? "exclamationmark.triangle.fill" : "info.circle")
-                                    .font(.caption)
-                                    .foregroundStyle(message.localizedCaseInsensitiveContains("but") ? Color.orange : Color.secondary)
-                            }
+                            LibraryAnalysisStatusLabel(
+                                message: model.libraryAnalysisMessages[playlist.id],
+                                isAnalyzing: model.isAnalyzingLibrary(for: playlist.id),
+                                hasAnalysis: true
+                            )
                         }
                         .padding(4)
                     }
@@ -534,6 +534,11 @@ struct PlaylistInspector: View {
                                 }
                             }
                             .disabled(model.isAnalyzingLibrary(for: playlist.id) || model.libraryReuseBlocker != nil)
+                            LibraryAnalysisStatusLabel(
+                                message: model.libraryAnalysisMessages[playlist.id],
+                                isAnalyzing: model.isAnalyzingLibrary(for: playlist.id),
+                                hasAnalysis: false
+                            )
                         }
                         .padding(4)
                     }

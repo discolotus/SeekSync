@@ -103,6 +103,8 @@ struct LibraryInspectorVariant: View {
         switch model.selectedSection {
         case .playlists:
             PlaylistLibraryScreen(onAdd: { showAddPlaylist = true })
+        case .inventory:
+            LibraryInventoryScreen()
         case .batchSync:
             BatchSyncScreen()
         case .syncPool:
@@ -129,6 +131,8 @@ struct LibraryInspectorVariant: View {
                     detail: "Its coverage, sync intent, and effective policy will appear here."
                 )
             }
+        case .inventory:
+            LibraryInventoryExplainer()
         case .batchSync:
             PolicyExplainer()
         case .syncPool:
