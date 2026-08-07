@@ -172,6 +172,7 @@ private struct RunDetailView: View {
                         .accessibilityValue("\(Int(run.progress * 100)) percent")
                     RunCountsView(counts: run.counts)
                 }
+                TrackFailureDetailsView(run: run)
                 Divider()
                 Text("Sanitized command").font(.caption.bold()).foregroundStyle(.secondary)
                 Text(run.commandPreview)

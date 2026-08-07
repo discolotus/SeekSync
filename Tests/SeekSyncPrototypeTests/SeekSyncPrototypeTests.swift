@@ -113,6 +113,50 @@ final class SeekSyncVisualRenderTests: XCTestCase {
             AnyView(identityComparison),
             size: NSSize(width: 640, height: 160)
         )
+        let failureRun = SyncRun(
+            playlistID: "visual-failure-run",
+            playlistName: "Visual failure run",
+            trigger: .manual,
+            phase: .partial,
+            progress: 1,
+            counts: RunCounts(unavailable: 2),
+            trackFailures: [
+                TrackSyncFailure(
+                    position: 4,
+                    artist: "Artist One",
+                    title: "No Results",
+                    album: "Album One",
+                    terminalOutcome: "Failed",
+                    failureReason: "NoSearchResults",
+                    skipReason: nil,
+                    rawResultCount: 0,
+                    lockedCount: 0,
+                    source: .soulseekAndYouTube
+                ),
+                TrackSyncFailure(
+                    position: 9,
+                    artist: "Artist Two",
+                    title: "Locked Result",
+                    album: "Album Two",
+                    terminalOutcome: "Failed",
+                    failureReason: "NoSearchResults",
+                    skipReason: nil,
+                    rawResultCount: 3,
+                    lockedCount: 3,
+                    source: .soulseek
+                )
+            ],
+            youtubeFallbackEnabled: true,
+            commandPreview: "sockseek <playlist>"
+        )
+        let failureDetails = TrackFailureDetailsView(run: failureRun)
+            .padding(20)
+            .frame(width: 680, height: 330, alignment: .topLeading)
+            .background(Color(nsColor: .windowBackgroundColor))
+        let failureDetailsPNG = try renderPNG(
+            AnyView(failureDetails),
+            size: NSSize(width: 680, height: 330)
+        )
 
         XCTAssertGreaterThan(compactPNG.count, 10_000)
         XCTAssertGreaterThan(standardPNG.count, 10_000)
@@ -121,6 +165,7 @@ final class SeekSyncVisualRenderTests: XCTestCase {
         XCTAssertGreaterThan(liveSyncPreviewPNG.count, 10_000)
         XCTAssertGreaterThan(brandHeaderPNG.count, 8_000)
         XCTAssertGreaterThan(identityComparisonPNG.count, 12_000)
+        XCTAssertGreaterThan(failureDetailsPNG.count, 10_000)
 
         if let outputPath = ProcessInfo.processInfo.environment["SEEKSYNC_VISUAL_QA_DIR"], !outputPath.isEmpty {
             let outputDirectory = URL(fileURLWithPath: outputPath, isDirectory: true)
@@ -132,6 +177,7 @@ final class SeekSyncVisualRenderTests: XCTestCase {
             try liveSyncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-live-sync-preview-660x520@2x.png"), options: .atomic)
             try brandHeaderPNG.write(to: outputDirectory.appendingPathComponent("implementation-brand-header-320x80@2x.png"), options: .atomic)
             try identityComparisonPNG.write(to: outputDirectory.appendingPathComponent("comparison-app-icon-vs-brand-header-640x160@2x.png"), options: .atomic)
+            try failureDetailsPNG.write(to: outputDirectory.appendingPathComponent("implementation-track-failure-details-680x330@2x.png"), options: .atomic)
         }
     }
 
@@ -612,11 +658,86 @@ final class SockseekProgressParserTests: XCTestCase {
         XCTAssertEqual(tracker.snapshot.currentTrack?.position, 2)
         XCTAssertEqual(tracker.counts.added, 1)
 
-        tracker.consume(#"{"type":"track_state","data":{"artist":"Artist Two","title":"Second Song","lifecycleState":"Terminal","terminalOutcome":"Failed","skipReason":"None"}}"#)
+        tracker.consume(#"{"type":"track_state","data":{"artist":"Artist Two","title":"Second Song","lifecycleState":"Terminal","terminalOutcome":"Failed","skipReason":"None","failureReason":"NoMatchingResults","rawResultCount":12,"lockedCount":0}}"#)
 
         XCTAssertEqual(tracker.snapshot.completedTracks, 2)
         XCTAssertNil(tracker.snapshot.currentTrack)
         XCTAssertEqual(tracker.counts.unavailable, 1)
+        XCTAssertEqual(tracker.failures.count, 1)
+        XCTAssertEqual(tracker.failures[0].position, 2)
+        XCTAssertEqual(tracker.failures[0].artist, "Artist Two")
+        XCTAssertEqual(tracker.failures[0].title, "Second Song")
+        XCTAssertEqual(tracker.failures[0].failureReason, "NoMatchingResults")
+        XCTAssertEqual(
+            tracker.failures[0].reasonDescription,
+            "12 Soulseek results were found, but none matched this track's requirements."
+        )
+    }
+
+    func testExplainsPreviouslyMissingAndLockedOnlyTracks() {
+        var tracker = SockseekProgressTracker()
+        tracker.consume(#"{"type":"track_list","data":{"total":2,"tracks":[{"index":0,"artist":"Artist One","title":"First Song","lifecycleState":"Terminal","terminalOutcome":"Skipped","skipReason":"PreviouslyNotFound","failureReason":"NoSearchResults","rawResultCount":0,"lockedCount":0},{"index":1,"artist":"Artist Two","title":"Second Song","lifecycleState":"Terminal","terminalOutcome":"Failed","skipReason":"None","failureReason":"NoSearchResults","rawResultCount":3,"lockedCount":3}]}}"#)
+
+        XCTAssertEqual(tracker.failures.map(\.position), [1, 2])
+        XCTAssertEqual(
+            tracker.failures[0].reasonDescription,
+            "Skipped because an earlier sync found no matching file."
+        )
+        XCTAssertEqual(
+            tracker.failures[1].reasonDescription,
+            "Only 3 locked results were found; no downloadable file was available."
+        )
+    }
+
+    func testDoesNotDuplicateTerminalTrackEvents() {
+        var tracker = SockseekProgressTracker()
+        let terminalTrack = #"{"type":"track_state","data":{"artist":"Artist One","title":"First Song","lifecycleState":"Terminal","terminalOutcome":"Failed","failureReason":"AllDownloadsFailed"}}"#
+        tracker.consume(#"{"type":"track_list","data":{"total":1,"tracks":[{"index":0,"artist":"Artist One","title":"First Song","lifecycleState":"Pending","terminalOutcome":"None","skipReason":"None"}]}}"#)
+        tracker.consume(terminalTrack)
+        tracker.consume(terminalTrack)
+
+        XCTAssertEqual(tracker.snapshot.completedTracks, 1)
+        XCTAssertEqual(tracker.counts.unavailable, 1)
+        XCTAssertEqual(tracker.failures.count, 1)
+    }
+
+    func testIdentifiesSoulseekOnlyAndCombinedSoulseekYtDlpFailures() {
+        let trackList = #"{"type":"track_list","data":{"total":1,"tracks":[{"index":0,"artist":"Artist One","title":"First Song","album":"Album One","lifecycleState":"Pending","terminalOutcome":"None"}]}}"#
+        let failed = #"{"type":"track_state","data":{"artist":"Artist One","title":"First Song","lifecycleState":"Terminal","terminalOutcome":"Failed","failureReason":"NoSearchResults","rawResultCount":0,"lockedCount":0}}"#
+
+        var soulseekOnly = SockseekProgressTracker(youtubeFallbackEnabled: false)
+        soulseekOnly.consume(trackList)
+        soulseekOnly.consume(failed)
+        XCTAssertEqual(soulseekOnly.failures[0].album, "Album One")
+        XCTAssertEqual(soulseekOnly.failures[0].source, .soulseek)
+        XCTAssertEqual(
+            soulseekOnly.failures[0].reasonDescription,
+            "No Soulseek file results were found. YouTube fallback was disabled for this run."
+        )
+
+        var withFallback = SockseekProgressTracker(youtubeFallbackEnabled: true)
+        withFallback.consume(trackList)
+        withFallback.consume(failed)
+        XCTAssertEqual(withFallback.failures[0].source, .soulseekAndYouTube)
+        XCTAssertEqual(
+            withFallback.failures[0].reasonDescription,
+            "Soulseek found no file, and yt-dlp found no usable YouTube result."
+        )
+    }
+
+    func testIdentifiesFailureDuringYtDlpFallback() {
+        var tracker = SockseekProgressTracker(youtubeFallbackEnabled: true)
+        tracker.consume(#"{"type":"track_list","data":{"total":1,"tracks":[{"index":0,"artist":"Artist One","title":"First Song","album":"Album One","lifecycleState":"Pending","terminalOutcome":"None"}]}}"#)
+        tracker.consume(#"{"type":"search_start","data":{"artist":"Artist One","title":"First Song","album":"Album One"}}"#)
+        tracker.consume(#"{"type":"track_state","data":{"artist":"Artist One","title":"First Song","lifecycleState":"Running","activityPhase":"RunningFallback","terminalOutcome":"None"}}"#)
+        tracker.consume(#"{"type":"track_state","data":{"artist":"Artist One","title":"First Song","lifecycleState":"Terminal","activityPhase":"None","terminalOutcome":"Failed","failureReason":"Other","failureMessage":"yt-dlp search failed with exit code 1"}}"#)
+
+        XCTAssertEqual(tracker.failures.count, 1)
+        XCTAssertEqual(tracker.failures[0].source, .youtubeFallback)
+        XCTAssertEqual(
+            tracker.failures[0].reasonDescription,
+            "The YouTube/yt-dlp fallback failed: yt-dlp search failed with exit code 1"
+        )
     }
 
     @MainActor
@@ -721,12 +842,23 @@ final class ProcessRunnerTests: XCTestCase {
             await streamedOutput.append(chunk)
         }
         let counts = AppModel.counts(from: result.output, fallbackTrackCount: 1)
+        var tracker = SockseekProgressTracker(youtubeFallbackEnabled: false)
+        tracker.consume(result.output)
         let streamed = await streamedOutput.joined()
 
         XCTAssertTrue(result.output.contains(#""type":"track_state""#))
         XCTAssertEqual(streamed, result.output)
         XCTAssertEqual(counts.unavailable, 1)
         XCTAssertEqual(counts.added + counts.alreadyBest + counts.needsReview, 0)
+        XCTAssertEqual(tracker.failures.count, 1)
+        XCTAssertEqual(tracker.failures[0].artist, "SeekSync QA")
+        XCTAssertEqual(tracker.failures[0].title, "Backend Contract")
+        XCTAssertEqual(tracker.failures[0].failureReason, "NoSearchResults")
+        XCTAssertEqual(tracker.failures[0].source, .soulseek)
+        XCTAssertEqual(
+            tracker.failures[0].reasonDescription,
+            "No Soulseek file results were found. YouTube fallback was disabled for this run."
+        )
     }
 
     @MainActor

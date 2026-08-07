@@ -3,6 +3,14 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.2] - 2026-08-06
+
+- Preserve the playlist position, song, artist, album, and reason for each
+  track that fails or needs review during a sync.
+- Identify whether a missing track came from Soulseek, the YouTube/yt-dlp
+  fallback, both search paths, or a cached previous result.
+- Show per-track failure details in Activity, run details, and Needs Attention.
+
 ## [0.3.1] - 2026-08-06
 
 - Refine the playlist sync confirmation dialog with a clearer summary of the

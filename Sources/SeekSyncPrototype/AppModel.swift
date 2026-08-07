@@ -146,11 +146,15 @@ final class AppModel: ObservableObject {
         plans.first { $0.playlistID == playlistID }
     }
 
+    func latestRun(for playlistID: String) -> SyncRun? {
+        runs.first { $0.playlistID == playlistID }
+    }
+
     func isInPool(_ playlistID: String) -> Bool { plan(for: playlistID) != nil }
 
     func needsAttention(_ playlist: Playlist) -> Bool {
         if playlist.health == .attention || playlist.needsReview > 0 { return true }
-        guard let latestRun = runs.first(where: { $0.playlistID == playlist.id }) else { return false }
+        guard let latestRun = latestRun(for: playlist.id) else { return false }
         return latestRun.phase == .partial || latestRun.phase == .failed
     }
 
@@ -523,10 +527,12 @@ final class AppModel: ObservableObject {
             return
         }
         let command = commandBuilder.command(for: playlist, settings: settings, youtubePolicy: youtubePolicy)
+        let youtubeFallbackEnabled = youtubePolicy.allowsFallback(using: settings)
         let run = SyncRun(
             playlistID: playlist.id,
             playlistName: playlist.name,
             trigger: trigger,
+            youtubeFallbackEnabled: youtubeFallbackEnabled,
             commandPreview: command.displayString
         )
         runs.insert(run, at: 0)
@@ -536,7 +542,14 @@ final class AppModel: ObservableObject {
         case .previewOnly:
             activeRunTask = Task { [weak self] in await self?.previewDemoRun(runID: run.id, playlist: playlist) }
         case .sockseek:
-            activeRunTask = Task { [weak self] in await self?.executeRun(runID: run.id, playlist: playlist, command: command) }
+            activeRunTask = Task { [weak self] in
+                await self?.executeRun(
+                    runID: run.id,
+                    playlist: playlist,
+                    command: command,
+                    youtubeFallbackEnabled: youtubeFallbackEnabled
+                )
+            }
         }
     }
 
@@ -574,8 +587,13 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func executeRun(runID: UUID, playlist: Playlist, command: SLDLCommand) async {
-        liveRunProgress[runID] = SockseekProgressTracker()
+    private func executeRun(
+        runID: UUID,
+        playlist: Playlist,
+        command: SLDLCommand,
+        youtubeFallbackEnabled: Bool
+    ) async {
+        liveRunProgress[runID] = SockseekProgressTracker(youtubeFallbackEnabled: youtubeFallbackEnabled)
         updateRun(runID) {
             $0.phase = .searching
             $0.progress = 0.08
@@ -585,6 +603,8 @@ final class AppModel: ObservableObject {
             let result = try await processRunner.run(command) { [weak self] chunk in
                 await self?.consumeSockseekOutput(chunk, runID: runID)
             }
+            var finalTracker = SockseekProgressTracker(youtubeFallbackEnabled: youtubeFallbackEnabled)
+            finalTracker.consume(result.output)
             liveRunProgress.removeValue(forKey: runID)
             let counts = Self.counts(from: result.output, fallbackTrackCount: playlist.trackCount)
             let completedItems = counts.added + counts.upgraded + counts.alreadyBest
@@ -604,13 +624,31 @@ final class AppModel: ObservableObject {
             } else {
                 message = "Sockseek exited with status \(result.exitCode)"
             }
-            finishRun(runID, phase: phase, counts: counts, message: message)
+            finishRun(
+                runID,
+                phase: phase,
+                counts: counts,
+                trackFailures: finalTracker.failures,
+                message: message
+            )
         } catch is CancellationError {
-            liveRunProgress.removeValue(forKey: runID)
-            finishRun(runID, phase: .cancelled, counts: RunCounts(), message: "Cancelled")
+            let progress = liveRunProgress.removeValue(forKey: runID)
+            finishRun(
+                runID,
+                phase: .cancelled,
+                counts: progress?.counts ?? RunCounts(),
+                trackFailures: progress?.failures,
+                message: "Cancelled"
+            )
         } catch {
-            liveRunProgress.removeValue(forKey: runID)
-            finishRun(runID, phase: .failed, counts: RunCounts(), message: error.localizedDescription)
+            let progress = liveRunProgress.removeValue(forKey: runID)
+            finishRun(
+                runID,
+                phase: .failed,
+                counts: progress?.counts ?? RunCounts(),
+                trackFailures: progress?.failures,
+                message: error.localizedDescription
+            )
         }
     }
 
@@ -625,6 +663,7 @@ final class AppModel: ObservableObject {
             $0.progress = snapshot.playlistFraction
             $0.counts = state.counts
             $0.progressDetails = snapshot
+            $0.trackFailures = state.failures
             if snapshot.totalTracks > 0 {
                 if snapshot.completedTracks == snapshot.totalTracks {
                     $0.message = "Verifying \(snapshot.totalTracks) track results"
@@ -646,12 +685,19 @@ final class AppModel: ObservableObject {
         update(&runs[index])
     }
 
-    private func finishRun(_ id: UUID, phase: RunPhase, counts: RunCounts, message: String) {
+    private func finishRun(
+        _ id: UUID,
+        phase: RunPhase,
+        counts: RunCounts,
+        trackFailures: [TrackSyncFailure]? = nil,
+        message: String
+    ) {
         updateRun(id) {
             $0.phase = phase
             $0.progress = 1
             $0.finishedAt = Date()
             $0.counts = counts
+            if let trackFailures { $0.trackFailures = trackFailures }
             $0.message = message
         }
         guard let run = runs.first(where: { $0.id == id }) else { return }
@@ -792,6 +838,32 @@ final class AppModel: ObservableObject {
             startedAt: Date().addingTimeInterval(-6_800),
             finishedAt: Date().addingTimeInterval(-6_200),
             counts: RunCounts(added: 2, upgraded: 3, alreadyBest: 77, unavailable: 1, needsReview: 1),
+            trackFailures: [
+                TrackSyncFailure(
+                    position: 83,
+                    artist: "Static Bloom",
+                    title: "Afterimage",
+                    album: "Signals After Dark",
+                    terminalOutcome: "Failed",
+                    failureReason: "NoMatchingResults",
+                    skipReason: nil,
+                    rawResultCount: 12,
+                    lockedCount: 0,
+                    source: .soulseekAndYouTube
+                ),
+                TrackSyncFailure(
+                    position: 84,
+                    artist: "Night Service",
+                    title: "Last Platform",
+                    album: "Terminal Lights",
+                    terminalOutcome: "Skipped",
+                    failureReason: nil,
+                    skipReason: "PreviouslyNotFound",
+                    rawResultCount: nil,
+                    lockedCount: nil,
+                    source: .cachedPreviousResult
+                )
+            ],
             message: "2 additions, 3 preferred-format upgrades, 2 items need attention",
             commandPreview: "sockseek <spotify-playlist> --progress-json --skip-check-pref-cond"
         ),

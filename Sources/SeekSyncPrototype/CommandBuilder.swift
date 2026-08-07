@@ -22,12 +22,7 @@ struct SockseekCommandBuilder {
         arguments += ["--write-playlist", settings.writeM3UPlaylist ? "true" : "false"]
         arguments += ["--skip-check-pref-cond", settings.lookForPreferredQuality ? "true" : "false"]
 
-        let allowYouTube: Bool
-        switch youtubePolicy {
-        case .inherit: allowYouTube = settings.allowYouTubeFallback
-        case .allow: allowYouTube = true
-        case .never: allowYouTube = false
-        }
+        let allowYouTube = youtubePolicy.allowsFallback(using: settings)
         arguments += ["--yt-dlp", allowYouTube ? "true" : "false"]
 
         return SLDLCommand(

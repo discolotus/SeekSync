@@ -261,6 +261,83 @@ struct RunCountsView: View {
     }
 }
 
+struct TrackFailureDetailsView: View {
+    let run: SyncRun
+
+    private var failures: [TrackSyncFailure] { run.trackFailures ?? [] }
+    private var reportedIssueCount: Int { run.counts.unavailable + run.counts.needsReview }
+    private var missingDetailCount: Int { max(reportedIssueCount - failures.count, 0) }
+
+    var body: some View {
+        if reportedIssueCount > 0 || !failures.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                Label(
+                    "\(max(reportedIssueCount, failures.count)) \(max(reportedIssueCount, failures.count) == 1 ? "track needs" : "tracks need") attention",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.caption.bold())
+                .foregroundStyle(.orange)
+
+                if let youtubeFallbackEnabled = run.youtubeFallbackEnabled {
+                    Text(
+                        youtubeFallbackEnabled
+                            ? "YouTube fallback through yt-dlp was enabled for this run."
+                            : "YouTube fallback was disabled; this run searched Soulseek only."
+                    )
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                }
+
+                ForEach(failures) { failure in
+                    HStack(alignment: .top, spacing: 10) {
+                        Text(failure.position.map(String.init) ?? "—")
+                            .font(.caption.bold().monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24, alignment: .trailing)
+                            .accessibilityLabel(failure.position.map { "Track \($0)" } ?? "Track position unavailable")
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Text("Song: \(failure.title)")
+                                    .font(.callout.weight(.semibold))
+                                Spacer(minLength: 8)
+                                Label(
+                                    (failure.source ?? .unknown).label,
+                                    systemImage: (failure.source ?? .unknown).systemImage
+                                )
+                                .font(.caption2.bold())
+                                .foregroundStyle(.secondary)
+                            }
+                            Text("Artist: \(failure.artist)")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            if let album = failure.album {
+                                Text("Album: \(album)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text(failure.reasonDescription)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    .accessibilityElement(children: .combine)
+                }
+
+                if missingDetailCount > 0 {
+                    Text("Sockseek reported \(missingDetailCount) additional \(missingDetailCount == 1 ? "track issue" : "track issues") without per-track reason data.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(12)
+            .background(Color.orange.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.orange.opacity(0.2)))
+        }
+    }
+}
+
 struct ActiveSyncProgressView: View {
     let run: SyncRun
     var compact = false
