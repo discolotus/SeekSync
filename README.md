@@ -43,6 +43,11 @@ For Xcode, open `Package.swift`, select the **SeekSyncPrototype** scheme, and us
 - Optional reuse of qualifying tracks from an existing music library via
   Sockseek's tag matcher. Reused files stay in place and generated M3U
   playlists reference their original paths.
+- A combined rekordbox library written beside the downloads folder after each
+  sync. `SeekSync.rekordbox.xml` describes every synced playlist in one file, so
+  **File → Import Library → rekordbox xml** brings them all in at once. SeekSync
+  only writes this file; it never reads or changes a rekordbox library, and
+  rekordbox still analyses BPM and key itself.
 - A read-only preflight compares preferred-condition-gated and ungated local
   matches against an empty mock backend. It also carries forward the stable
   playlist index, so it can distinguish references, prior downloads,

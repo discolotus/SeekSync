@@ -1059,6 +1059,11 @@ struct SettingsScreen: View {
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
+                        Divider()
+                        Toggle("Write a rekordbox library", isOn: rekordboxXMLBinding)
+                        Text("After each sync, SeekSync writes \(RekordboxXMLExporter.fileName) beside the downloads folder, describing every synced playlist. Import it with File → Import Library → rekordbox xml to bring them all in at once. SeekSync never reads or changes your rekordbox library, and rekordbox analyses BPM and key itself.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(4)
                 }
@@ -1365,6 +1370,14 @@ struct SettingsScreen: View {
         model.settings.isLibraryReuseEnabled
             ? .constant(true)
             : configBinding(\.writeM3UPlaylist)
+    }
+
+    // App-local, so it never marks Sockseek's config dirty.
+    private var rekordboxXMLBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.isRekordboxXMLEnabled },
+            set: { model.setRekordboxXMLEnabled($0) }
+        )
     }
 
     private var preferredQualityCheckBinding: Binding<Bool> {

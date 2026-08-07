@@ -1948,3 +1948,316 @@ final class SeekSyncLiveAcceptanceTests: XCTestCase {
         XCTAssertEqual(downloadedAudio.count, 1, "Expected one downloaded audio file in the isolated QA folder.")
     }
 }
+
+// MARK: - Rekordbox XML export
+
+private func indexEntry(
+    path: String?,
+    artist: String = "Artist",
+    album: String = "Album",
+    title: String = "Title",
+    lengthSeconds: Int = 200,
+    state: Int = 1
+) -> SockseekIndexEntry {
+    SockseekIndexEntry(
+        path: path,
+        artist: artist,
+        album: album,
+        title: title,
+        lengthSeconds: lengthSeconds,
+        state: state,
+        failureReason: 0
+    )
+}
+
+final class RekordboxCollectionBuilderTests: XCTestCase {
+    func testSharedFileAcrossPlaylistsBecomesOneTrackReferencedTwice() {
+        let shared = indexEntry(path: "/Music/downloads/shared.flac", title: "Shared")
+        let collection = RekordboxCollectionBuilder().build(from: [
+            .init(name: "Warm Up", entries: [shared]),
+            .init(name: "Peak Time", entries: [shared, indexEntry(path: "/Music/downloads/other.flac", title: "Other")])
+        ])
+
+        XCTAssertEqual(collection.tracks.count, 2)
+        XCTAssertEqual(collection.nodes.map(\.name), ["Warm Up", "Peak Time"])
+        let sharedID = try? XCTUnwrap(collection.tracks.first { $0.title == "Shared" }?.id)
+        XCTAssertEqual(collection.nodes[0].trackIDs, [sharedID])
+        XCTAssertEqual(collection.nodes[1].trackIDs.first, sharedID)
+        XCTAssertEqual(collection.nodes[1].trackIDs.count, 2)
+    }
+
+    func testExcludesEntriesWithoutAPathOrWithoutAnAvailableState() {
+        let collection = RekordboxCollectionBuilder().build(from: [
+            .init(name: "Mixed", entries: [
+                indexEntry(path: "/Music/downloads/downloaded.flac", title: "Downloaded", state: 1),
+                indexEntry(path: "/Music/library/existing.flac", title: "Existing", state: 3),
+                indexEntry(path: nil, title: "No Path", state: 1),
+                indexEntry(path: "/Music/downloads/failed.flac", title: "Failed", state: 2)
+            ])
+        ])
+
+        XCTAssertEqual(collection.tracks.map(\.title).sorted(), ["Downloaded", "Existing"])
+        XCTAssertEqual(collection.nodes[0].trackIDs.count, 2)
+    }
+
+    func testPreservesIndexOrderWithinAPlaylistAndDropsEmptyPlaylists() {
+        let collection = RekordboxCollectionBuilder().build(from: [
+            .init(name: "Ordered", entries: [
+                indexEntry(path: "/a.flac", title: "First"),
+                indexEntry(path: "/b.flac", title: "Second"),
+                indexEntry(path: "/c.flac", title: "Third")
+            ]),
+            .init(name: "Empty", entries: [indexEntry(path: nil, title: "Nope")])
+        ])
+
+        let titlesInOrder = collection.nodes[0].trackIDs.compactMap { id in
+            collection.tracks.first { $0.id == id }?.title
+        }
+        XCTAssertEqual(titlesInOrder, ["First", "Second", "Third"])
+        XCTAssertEqual(collection.nodes.map(\.name), ["Ordered"])
+    }
+
+    func testDerivesRekordboxKindFromTheFileExtension() {
+        let collection = RekordboxCollectionBuilder().build(from: [
+            .init(name: "Kinds", entries: [
+                indexEntry(path: "/a.flac", title: "Flac"),
+                indexEntry(path: "/b.MP3", title: "Mp3"),
+                indexEntry(path: "/c.weird", title: "Weird")
+            ])
+        ])
+
+        func kind(_ title: String) -> String? { collection.tracks.first { $0.title == title }?.kind }
+        XCTAssertEqual(kind("Flac"), "FLAC File")
+        XCTAssertEqual(kind("Mp3"), "MP3 File")
+        XCTAssertEqual(kind("Weird"), "WEIRD File")
+    }
+}
+
+final class RekordboxXMLWriterTests: XCTestCase {
+    private func collection(
+        tracks: [RekordboxTrack],
+        nodes: [RekordboxPlaylistNode]
+    ) -> RekordboxCollection {
+        RekordboxCollection(tracks: tracks, nodes: nodes)
+    }
+
+    func testEscapesReservedCharactersInTrackMetadata() throws {
+        let xml = RekordboxXMLWriter().xml(for: collection(
+            tracks: [
+                RekordboxTrack(
+                    id: 1,
+                    path: "/Music/one.flac",
+                    title: "Rock & <Roll>",
+                    artist: "The \"Quotes\"",
+                    album: "A & B",
+                    lengthSeconds: 200,
+                    kind: "FLAC File"
+                )
+            ],
+            nodes: [RekordboxPlaylistNode(name: "Set & Setting", trackIDs: [1])]
+        ))
+
+        XCTAssertFalse(xml.contains("Rock & <Roll>"))
+        XCTAssertTrue(xml.contains("Rock &amp; &lt;Roll&gt;"))
+        XCTAssertTrue(xml.contains("The &quot;Quotes&quot;"))
+        let document = try XMLDocument(xmlString: xml, options: [])
+        let names = try document.nodes(forXPath: "//TRACK/@Name").compactMap(\.stringValue)
+        XCTAssertEqual(names, ["Rock & <Roll>"])
+        let playlists = try document.nodes(forXPath: "//NODE[@Type='1']/@Name").compactMap(\.stringValue)
+        XCTAssertEqual(playlists, ["Set & Setting"])
+    }
+
+    func testEncodesPathsWithSpacesAndNonASCIICharactersAsFileURIs() throws {
+        let xml = RekordboxXMLWriter().xml(for: collection(
+            tracks: [
+                RekordboxTrack(
+                    id: 1,
+                    path: "/Music/Été Sessions/track one.flac",
+                    title: "One",
+                    artist: "A",
+                    album: "B",
+                    lengthSeconds: 100,
+                    kind: "FLAC File"
+                )
+            ],
+            nodes: [RekordboxPlaylistNode(name: "Set", trackIDs: [1])]
+        ))
+
+        let document = try XMLDocument(xmlString: xml, options: [])
+        let location = try XCTUnwrap(document.nodes(forXPath: "//TRACK/@Location").first?.stringValue)
+        XCTAssertTrue(location.hasPrefix("file://localhost/"), location)
+        XCTAssertFalse(location.contains(" "), location)
+        XCTAssertTrue(location.contains("%20"), location)
+        XCTAssertEqual(URL(string: location)?.path, "/Music/Été Sessions/track one.flac")
+    }
+
+    func testWritesACollectionAndPlaylistTreeRekordboxCanRead() throws {
+        let xml = RekordboxXMLWriter().xml(for: collection(
+            tracks: [
+                RekordboxTrack(id: 1, path: "/a.flac", title: "One", artist: "A", album: "B", lengthSeconds: 100, kind: "FLAC File"),
+                RekordboxTrack(id: 2, path: "/b.flac", title: "Two", artist: "A", album: "B", lengthSeconds: -1, kind: "FLAC File")
+            ],
+            nodes: [
+                RekordboxPlaylistNode(name: "Warm Up", trackIDs: [1]),
+                RekordboxPlaylistNode(name: "Peak", trackIDs: [1, 2])
+            ]
+        ))
+
+        let document = try XMLDocument(xmlString: xml, options: [])
+        XCTAssertEqual(document.rootElement()?.name, "DJ_PLAYLISTS")
+        XCTAssertEqual(document.rootElement()?.attribute(forName: "Version")?.stringValue, "1.0.0")
+        XCTAssertEqual(try document.nodes(forXPath: "//COLLECTION/@Entries").first?.stringValue, "2")
+        XCTAssertEqual(try document.nodes(forXPath: "//COLLECTION/TRACK").count, 2)
+        let rootFolder = "/DJ_PLAYLISTS/PLAYLISTS/NODE[@Type='0'][@Name='ROOT']"
+        XCTAssertEqual(try document.nodes(forXPath: rootFolder).count, 1)
+        XCTAssertEqual(
+            try document.nodes(forXPath: "\(rootFolder)/NODE[@Type='0']/@Name").compactMap(\.stringValue),
+            ["SeekSync"]
+        )
+        let playlists = try document.nodes(forXPath: "\(rootFolder)/NODE/NODE[@Type='1']/@Name").compactMap(\.stringValue)
+        XCTAssertEqual(playlists, ["Warm Up", "Peak"])
+        XCTAssertEqual(try document.nodes(forXPath: "//NODE[@Name='Peak']/TRACK/@Key").compactMap(\.stringValue), ["1", "2"])
+        XCTAssertEqual(try document.nodes(forXPath: "//NODE[@Name='Peak']/@Entries").first?.stringValue, "2")
+        // An unknown length must be omitted rather than written as a negative time.
+        XCTAssertEqual(try document.nodes(forXPath: "//TRACK[@Name='Two']/@TotalTime").count, 0)
+        XCTAssertEqual(try document.nodes(forXPath: "//TRACK[@Name='One']/@TotalTime").first?.stringValue, "100")
+    }
+}
+
+final class RekordboxXMLExporterTests: XCTestCase {
+    private var directory: URL!
+
+    override func setUpWithError() throws {
+        directory = FileManager.default.temporaryDirectory.appendingPathComponent("SeekSyncRekordbox-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: directory)
+    }
+
+    private func writeIndex(named name: String, rows: [(path: String, title: String, state: Int)]) throws -> String {
+        let url = directory.appendingPathComponent(name)
+        var lines = ["filepath,artist,album,title,length,tracktype,state,failurereason"]
+        lines += rows.map { "\($0.path),Artist,Album,\($0.title),200,0,\($0.state),0" }
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+        return url.path
+    }
+
+    func testSkipsPlaylistsWhoseIndexIsMissingAndExportsTheRest() throws {
+        let present = try writeIndex(named: "present.csv", rows: [
+            (path: "/Music/downloads/one.flac", title: "One", state: 1)
+        ])
+        let output = directory.appendingPathComponent("SeekSync.rekordbox.xml")
+
+        let written = try RekordboxXMLExporter().export(
+            sources: [
+                .init(name: "Present", indexPath: present),
+                .init(name: "Missing", indexPath: directory.appendingPathComponent("nope.csv").path)
+            ],
+            to: output
+        )
+
+        XCTAssertEqual(written, 1)
+        let document = try XMLDocument(contentsOf: output, options: [])
+        XCTAssertEqual(try document.nodes(forXPath: "//NODE[@Type='1']/@Name").compactMap(\.stringValue), ["Present"])
+        XCTAssertEqual(try document.nodes(forXPath: "//COLLECTION/TRACK").count, 1)
+    }
+
+    func testLeavesAnExistingExportUntouchedWhenThereIsNothingToWrite() throws {
+        let output = directory.appendingPathComponent("SeekSync.rekordbox.xml")
+        try "<!-- previous good export -->".write(to: output, atomically: true, encoding: .utf8)
+        let empty = try writeIndex(named: "empty.csv", rows: [
+            (path: "", title: "Unavailable", state: 2)
+        ])
+
+        let written = try RekordboxXMLExporter().export(
+            sources: [.init(name: "Empty", indexPath: empty)],
+            to: output
+        )
+
+        XCTAssertEqual(written, 0)
+        XCTAssertEqual(try String(contentsOf: output), "<!-- previous good export -->")
+    }
+
+    func testResolvesTheExportURLBesideTheDownloadsFolder() {
+        let url = RekordboxXMLExporter.exportURL(outputDirectory: "~/Music/downloads/")
+        XCTAssertEqual(url.lastPathComponent, "SeekSync.rekordbox.xml")
+        XCTAssertFalse(url.path.contains("~"), url.path)
+        XCTAssertTrue(url.deletingLastPathComponent().path.hasSuffix("/Music/downloads"), url.path)
+    }
+}
+
+final class RekordboxSettingsTests: XCTestCase {
+    func testExportIsEnabledUntilTheUserTurnsItOff() {
+        var settings = ClientSettings()
+        XCTAssertNil(settings.rekordboxXMLEnabled)
+        XCTAssertTrue(settings.isRekordboxXMLEnabled)
+
+        settings.rekordboxXMLEnabled = false
+        XCTAssertFalse(settings.isRekordboxXMLEnabled)
+    }
+
+    func testExportPreferenceIsNeverWrittenIntoTheSockseekConfig() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("SeekSyncRekordboxConf-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let configURL = directory.appendingPathComponent("sockseek.conf")
+        try "username = tester\npath = ~/Music/downloads\n".write(to: configURL, atomically: true, encoding: .utf8)
+
+        let store = ConfigStore()
+        var loaded = try store.load(from: configURL, binaryPath: "/tmp/sockseek")
+        XCTAssertNil(loaded.settings.rekordboxXMLEnabled, "Sockseek's config must not be the source of an app-local preference.")
+
+        loaded.settings.rekordboxXMLEnabled = false
+        _ = try store.save(
+            settings: loaded.settings,
+            document: loaded.document,
+            to: configURL,
+            expectedRevision: loaded.revision
+        )
+
+        let saved = try String(contentsOf: configURL)
+        XCTAssertFalse(saved.lowercased().contains("rekordbox"), saved)
+    }
+}
+
+final class RekordboxWiringTests: XCTestCase {
+    func testPreservesAppLocalPreferencesAcrossAConfigReload() {
+        var fromDisk = ClientSettings()
+        fromDisk.outputDirectory = "~/Music/from-config"
+        var appLocal = ClientSettings()
+        appLocal.rekordboxXMLEnabled = false
+        appLocal.libraryReuseEnabled = true
+        appLocal.libraryDirectory = "~/Music/library"
+        appLocal.dailyHour = 5
+        appLocal.dailyMinute = 30
+        appLocal.liveSchedulingArmed = true
+
+        let merged = fromDisk.mergingPrototypePreferences(from: appLocal)
+
+        XCTAssertEqual(merged.outputDirectory, "~/Music/from-config")
+        XCTAssertEqual(merged.rekordboxXMLEnabled, false)
+        XCTAssertEqual(merged.libraryReuseEnabled, true)
+        XCTAssertEqual(merged.libraryDirectory, "~/Music/library")
+        XCTAssertEqual(merged.dailyHour, 5)
+        XCTAssertEqual(merged.dailyMinute, 30)
+        XCTAssertEqual(merged.liveSchedulingArmed, true)
+    }
+
+    func testBuildsExporterSourcesFromPlaylistsThatCanHaveAnIndex() {
+        var synced = Playlist.samples[0]
+        synced.isFixture = false
+        var fixture = Playlist.samples[1]
+        fixture.isFixture = true
+
+        let sources = RekordboxXMLExporter.sources(
+            for: [synced, fixture],
+            outputDirectory: "~/Music/downloads"
+        )
+
+        XCTAssertEqual(sources.map(\.name), [synced.name])
+        let expected = SockseekCommandBuilder().indexPath(for: synced, outputDirectory: "~/Music/downloads")
+        XCTAssertEqual(sources.first?.indexPath, expected)
+    }
+}
