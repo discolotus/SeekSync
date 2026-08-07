@@ -383,7 +383,7 @@ final class AppModel: ObservableObject {
 
     func setBinaryPath(_ path: String) {
         settings.binaryPath = path
-        markConfigDirty()
+        persist()
         let expanded = NSString(string: path).expandingTildeInPath
         guard FileManager.default.isExecutableFile(atPath: expanded) else {
             dependencyState = .missing
@@ -396,6 +396,75 @@ final class AppModel: ObservableObject {
             guard NSString(string: self.settings.binaryPath).expandingTildeInPath == expanded else { return }
             self.dependencyState = state
         }
+    }
+
+    func useAutomaticBinaryPath() {
+        setBinaryPath(ConfigStore.detectedBinaryPath())
+        toastMessage = "Sockseek location set automatically."
+    }
+
+    func checkSockseek() {
+        let expanded = NSString(string: settings.binaryPath).expandingTildeInPath
+        dependencyState = .checking
+        Task { [weak self] in
+            guard let self else { return }
+            self.dependencyState = await self.processRunner.version(at: expanded)
+        }
+    }
+
+    func setConfigPath(_ path: String) {
+        settings.configPath = path
+        reloadConfig()
+    }
+
+    func updateOutputDirectory(_ path: String) {
+        guard settings.outputDirectory != path else { return }
+        settings.outputDirectory = path
+        markConfigDirty()
+        toastMessage = "Downloads folder updated. Save changes to apply it."
+    }
+
+    func moveLibraryAndUpdateOutputDirectory(to path: String) async {
+        guard activeRun == nil else {
+            toastMessage = "Wait for the active sync to finish before moving the library."
+            return
+        }
+        let sourcePath = NSString(string: settings.outputDirectory).expandingTildeInPath
+        let destinationPath = NSString(string: path).expandingTildeInPath
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                try LibraryMover().moveContents(
+                    from: URL(fileURLWithPath: sourcePath, isDirectory: true),
+                    to: URL(fileURLWithPath: destinationPath, isDirectory: true)
+                )
+            }.value
+            settings.outputDirectory = path
+            markConfigDirty()
+            let itemLabel = result.movedItemCount == 1 ? "item" : "items"
+            toastMessage = result.movedItemCount == 0
+                ? "Downloads folder updated; there was no existing library to move."
+                : "Moved \(result.movedItemCount) \(itemLabel) to the new downloads folder."
+        } catch {
+            configMessage = error.localizedDescription
+            toastMessage = error.localizedDescription
+        }
+    }
+
+    func updateCredentials(
+        soulseekUsername: String,
+        soulseekPassword: String,
+        spotifyClientID: String,
+        spotifyClientSecret: String
+    ) {
+        guard settings.soulseekUsername != soulseekUsername
+                || settings.soulseekPassword != soulseekPassword
+                || settings.spotifyClientID != spotifyClientID
+                || settings.spotifyClientSecret != spotifyClientSecret else { return }
+        settings.soulseekUsername = soulseekUsername
+        settings.soulseekPassword = soulseekPassword
+        settings.spotifyClientID = spotifyClientID
+        settings.spotifyClientSecret = spotifyClientSecret
+        markConfigDirty()
     }
 
     func installSockseek() async {

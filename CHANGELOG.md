@@ -3,6 +3,19 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-08-06
+
+- Reorganize Settings around downloads, accounts, automation, and Sockseek
+  health while moving detected executable and config locations into Advanced.
+- Add a native downloads-folder picker with explicit options to move the
+  existing library or leave it in place, refusing destination conflicts before
+  any files are moved.
+- Replace free-form audio preferences with format and contextual bitrate menus
+  backed by Sockseek's `pref-format` and `pref-min-bitrate` settings while
+  preserving custom existing values.
+- Keep account credentials locked until Edit is chosen, add intentional secret
+  reveal controls, and retain compatibility with previously saved app state.
+
 ## [0.2.1] - 2026-08-04
 
 - Polish the responsive library and inspector layouts across compact and wide

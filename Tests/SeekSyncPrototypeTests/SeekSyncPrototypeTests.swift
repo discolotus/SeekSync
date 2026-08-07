@@ -350,6 +350,110 @@ final class ConfigStoreTests: XCTestCase {
         _ = try store.save(settings: loaded.settings, document: loaded.document, to: configURL, expectedRevision: loaded.revision)
         XCTAssertTrue(try String(contentsOf: configURL).contains("pref-format = flac,wav"))
     }
+
+    func testPreferredBitrateLoadsAndRoundTripsThroughSelectedProfile() throws {
+        try """
+        username = tester
+        password = fixture
+
+        [playlist]
+        output-dir = /Volumes/Music
+        pref-format = mp3
+        pref-min-bitrate = 320
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+        let store = ConfigStore()
+        var loaded = try store.load(from: configURL, binaryPath: "/tmp/sockseek")
+        XCTAssertEqual(loaded.settings.preferredFormat, .mp3)
+        XCTAssertEqual(loaded.settings.preferredMinBitrateValue, .kbps320)
+
+        loaded.settings.preferredMinBitrate = .kbps256
+        loaded.settings.preferredMinBitrateRaw = "256"
+        _ = try store.save(
+            settings: loaded.settings,
+            document: loaded.document,
+            to: configURL,
+            expectedRevision: loaded.revision
+        )
+        XCTAssertTrue(try String(contentsOf: configURL).contains("pref-min-bitrate = 256"))
+    }
+
+    func testPreservesCustomPreferredBitrateOnUnrelatedSave() throws {
+        try """
+        username = tester
+        password = fixture
+        output-dir = /Volumes/Music
+        pref-format = mp3
+        pref-min-bitrate = 224
+        """.write(to: configURL, atomically: true, encoding: .utf8)
+        let store = ConfigStore()
+        var loaded = try store.load(from: configURL, binaryPath: "/tmp/sockseek")
+        loaded.settings.allowYouTubeFallback = true
+
+        _ = try store.save(
+            settings: loaded.settings,
+            document: loaded.document,
+            to: configURL,
+            expectedRevision: loaded.revision
+        )
+
+        XCTAssertTrue(try String(contentsOf: configURL).contains("pref-min-bitrate = 224"))
+    }
+}
+
+final class LibraryMoverTests: XCTestCase {
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("SeekSyncLibraryMover-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testMovesLibraryContentsIntoChosenFolder() throws {
+        let source = root.appendingPathComponent("Old", isDirectory: true)
+        let destination = root.appendingPathComponent("New", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try Data("track".utf8).write(to: source.appendingPathComponent("Track.flac"))
+        try FileManager.default.createDirectory(at: source.appendingPathComponent("Playlist", isDirectory: true), withIntermediateDirectories: true)
+
+        let result = try LibraryMover().moveContents(from: source, to: destination)
+
+        XCTAssertEqual(result.movedItemCount, 2)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.appendingPathComponent("Track.flac").path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: destination.appendingPathComponent("Playlist").path))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: source.path), [])
+    }
+
+    func testConflictStopsBeforeAnythingMoves() throws {
+        let source = root.appendingPathComponent("Old", isDirectory: true)
+        let destination = root.appendingPathComponent("New", isDirectory: true)
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+        try Data("old".utf8).write(to: source.appendingPathComponent("Track.flac"))
+        try Data("new".utf8).write(to: destination.appendingPathComponent("Track.flac"))
+
+        XCTAssertThrowsError(try LibraryMover().moveContents(from: source, to: destination)) { error in
+            XCTAssertEqual(error as? LibraryMoveError, .conflicts(["Track.flac"]))
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: source.appendingPathComponent("Track.flac").path))
+        XCTAssertEqual(try String(contentsOf: destination.appendingPathComponent("Track.flac")), "new")
+    }
+}
+
+final class ClientSettingsCodingTests: XCTestCase {
+    func testDecodesSavedSettingsFromBeforeBitratePreferenceWasAdded() throws {
+        let encoded = try JSONEncoder().encode(ClientSettings())
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "preferredMinBitrate")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(ClientSettings.self, from: legacyData)
+
+        XCTAssertEqual(decoded.preferredMinBitrateValue, .kbps200)
+    }
 }
 
 final class SockseekCommandBuilderTests: XCTestCase {
