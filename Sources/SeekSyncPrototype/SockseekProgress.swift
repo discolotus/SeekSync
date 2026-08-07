@@ -195,6 +195,7 @@ struct SockseekProgressTracker {
     private(set) var snapshot = SyncProgressSnapshot()
     private(set) var counts = RunCounts()
     private(set) var failures: [TrackSyncFailure] = []
+    private(set) var playlistTracks: [PlaylistTrackSeed] = []
 
     private var positionsByTrack: [String: [Int]] = [:]
     private var albumsByPosition: [Int: String] = [:]
@@ -226,6 +227,18 @@ struct SockseekProgressTracker {
         switch event.type {
         case "track_list":
             snapshot.totalTracks = max(snapshot.totalTracks, data.total ?? 0)
+            if let tracks = data.tracks, !tracks.isEmpty {
+                playlistTracks = tracks.enumerated().map { offset, track in
+                    PlaylistTrackSeed(
+                        position: (track.index ?? offset) + 1,
+                        artist: track.artist ?? "Unknown artist",
+                        title: track.title ?? "Unknown track",
+                        album: normalizedMetadata(track.album),
+                        lengthSeconds: track.length
+                    )
+                }
+                .sorted { $0.position < $1.position }
+            }
             for track in data.tracks ?? [] {
                 let key = trackKey(artist: track.artist, title: track.title)
                 if let key, let index = track.index {
@@ -450,6 +463,7 @@ struct SockseekProgressData: Decodable {
     let artist: String?
     let title: String?
     let album: String?
+    let length: Int?
     let lifecycleState: String?
     let activityPhase: String?
     let terminalOutcome: String?
@@ -470,6 +484,7 @@ struct SockseekTrackProgress: Decodable {
     let artist: String?
     let title: String?
     let album: String?
+    let length: Int?
     let lifecycleState: String?
     let activityPhase: String?
     let terminalOutcome: String?

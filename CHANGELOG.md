@@ -3,6 +3,26 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.5] - 2026-08-06
+
+- Add an opt-in existing-music-library folder whose qualifying tracks are
+  referenced in generated M3U playlists instead of downloaded or copied.
+- Preview library reuse without contacting Soulseek by comparing
+  preferred-condition-gated and ungated tag matches against an isolated empty
+  mock backend, while carrying forward the playlist's stable output index.
+- Keep a per-playlist track inventory with library references, below-target
+  local matches, prior downloads, download needs, file paths, and available
+  audio-quality data; reconcile it with the real index after each sync.
+
+## [0.3.4] - 2026-08-06
+
+- Let individually confirmed playlists join the active sequential sync queue,
+  with visible ordering, duplicate prevention, and per-item removal.
+- Preserve the exact settings snapshot confirmed for each queued sync and
+  advance to the next playlist after completion or cancellation.
+- Display the packaged SeekSync version beside the detected Sockseek version
+  in the sidebar status area.
+
 ## [0.3.3] - 2026-08-06
 
 - Add a searchable playlist grid for selecting and confirming one-time batch

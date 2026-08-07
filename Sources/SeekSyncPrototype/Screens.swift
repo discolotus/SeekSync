@@ -16,7 +16,7 @@ struct AppSidebar: View {
                     sidebarRow(.syncPool, badge: model.plans.count)
                 }
                 Section("Runs") {
-                    sidebarRow(.activity, badge: model.activeRun == nil ? nil : 1)
+                    sidebarRow(.activity, badge: (model.activeRun == nil ? 0 : 1) + model.queuedSyncCount)
                     sidebarRow(.attention, badge: model.attentionCount)
                 }
                 Section {
@@ -26,7 +26,14 @@ struct AppSidebar: View {
             .listStyle(.sidebar)
 
             VStack(alignment: .leading, spacing: 8) {
-                DependencyPill(state: model.dependencyState)
+                HStack(spacing: 6) {
+                    DependencyPill(state: model.dependencyState)
+                    Text(SeekSyncVersion.shortLabel)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .help(SeekSyncVersion.label)
+                        .accessibilityLabel(SeekSyncVersion.label)
+                }
                 StatusPill(
                     text: model.spotifyState.label,
                     systemImage: "music.note",
@@ -137,7 +144,7 @@ struct BatchSyncScreen: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button(model.queuedSyncCount > 0 ? "Cancel batch" : "Cancel sync") {
+                        Button("Cancel current") {
                             model.cancelActiveRun()
                         }
                         .controlSize(.small)
@@ -333,6 +340,9 @@ struct PlaylistLibraryScreen: View {
                     }
                     .accessibilityElement(children: .contain)
                 }
+                if !model.queuedSyncs.isEmpty {
+                    SyncQueueView(compact: true)
+                }
                 HStack {
                     TextField("Search playlists", text: $model.searchText)
                         .textFieldStyle(.roundedBorder)
@@ -409,6 +419,7 @@ struct PlaylistInspector: View {
     @EnvironmentObject private var model: AppModel
     let playlist: Playlist
     @State private var showCommand = false
+    @State private var showTrackList = false
 
     var body: some View {
         ScrollView {
@@ -471,12 +482,74 @@ struct PlaylistInspector: View {
                     }
                 }
 
+                if let analysis = model.libraryAnalysis(for: playlist.id) {
+                    GroupBox("Playlist track inventory") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            if !model.isLibraryAnalysisCurrent(analysis, for: playlist) {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Label(
+                                        "This inventory predates the current playlist, library folder, or reuse conditions.",
+                                        systemImage: "exclamationmark.triangle.fill"
+                                    )
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
+                                    Spacer()
+                                    if model.settings.isLibraryReuseEnabled {
+                                        Button("Refresh") {
+                                            model.analyzeLibraryReuse(for: playlist)
+                                        }
+                                        .controlSize(.small)
+                                        .disabled(model.isAnalyzingLibrary(for: playlist.id) || model.libraryReuseBlocker != nil)
+                                    }
+                                }
+                            }
+                            LibraryReuseAnalysisSummaryCard(analysis: analysis) {
+                                showTrackList = true
+                            }
+                            if let message = model.libraryAnalysisMessages[playlist.id],
+                               !model.isAnalyzingLibrary(for: playlist.id) {
+                                Label(message, systemImage: message.localizedCaseInsensitiveContains("but") ? "exclamationmark.triangle.fill" : "info.circle")
+                                    .font(.caption)
+                                    .foregroundStyle(message.localizedCaseInsensitiveContains("but") ? Color.orange : Color.secondary)
+                            }
+                        }
+                        .padding(4)
+                    }
+                } else if model.settings.isLibraryReuseEnabled,
+                          playlist.executionKind == .sockseek {
+                    GroupBox("Playlist track inventory") {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Preview this playlist against your existing music library to see every qualifying reference, below-target local file, and track that still needs a download.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button {
+                                model.analyzeLibraryReuse(for: playlist)
+                            } label: {
+                                if model.isAnalyzingLibrary(for: playlist.id) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                    Text("Analyzing library…")
+                                } else {
+                                    Label("Preview Library Reuse", systemImage: "magnifyingglass")
+                                }
+                            }
+                            .disabled(model.isAnalyzingLibrary(for: playlist.id) || model.libraryReuseBlocker != nil)
+                        }
+                        .padding(4)
+                    }
+                }
+
                 GroupBox("Effective download policy") {
                     VStack(alignment: .leading, spacing: 10) {
                         AdaptiveValueRow("Destination", value: model.settings.outputDirectory)
                         AdaptiveValueRow("Target", value: model.settings.preferredFormatLabel)
                         AdaptiveValueRow("YouTube fallback", value: effectiveYouTubeLabel)
-                        AdaptiveValueRow("Recheck", value: model.settings.lookForPreferredQuality ? "Files below preferred conditions" : "Missing files only")
+                        AdaptiveValueRow(
+                            "Recheck",
+                            value: model.settings.lookForPreferredQuality || model.settings.isLibraryReuseEnabled
+                                ? "Files below preferred conditions"
+                                : "Missing files only"
+                        )
                         Divider()
                         Text("“Preferred quality” is a technical target. Sockseek will revisit an indexed lossy file when FLAC is preferred, but it cannot judge mastering quality.")
                             .font(.caption)
@@ -506,6 +579,11 @@ struct PlaylistInspector: View {
             .padding(22)
         }
         .background(.background.opacity(0.6))
+        .sheet(isPresented: $showTrackList) {
+            if let analysis = model.libraryAnalysis(for: playlist.id) {
+                PlaylistTrackListSheet(analysis: analysis)
+            }
+        }
     }
 
     private var syncButton: some View {
@@ -691,11 +769,81 @@ struct ActivityScreen: View {
             Divider()
             ScrollView {
                 LazyVStack(spacing: 12) {
+                    if !model.queuedSyncs.isEmpty {
+                        SyncQueueView()
+                    }
                     ForEach(model.runs) { run in RunRow(run: run) }
                 }
                 .padding(16)
             }
         }
+    }
+}
+
+struct SyncQueueView: View {
+    @EnvironmentObject private var model: AppModel
+    var compact = false
+
+    private var displayedItems: [SyncQueueItem] {
+        compact ? Array(model.queuedSyncs.prefix(3)) : model.queuedSyncs
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Up next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                    .font(.headline)
+                Spacer()
+                Text("\(model.queuedSyncCount) queued")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(Array(displayedItems.enumerated()), id: \.element.id) { index, item in
+                HStack(spacing: 10) {
+                    Text("\(index + 1)")
+                        .font(.caption.bold().monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18)
+                    PlaylistArtwork(playlist: item.playlist, size: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.playlist.name)
+                            .font(.callout.weight(.semibold))
+                            .lineLimit(1)
+                        Text("\(item.trigger.rawValue) · \(queuedLabel(item.queuedAt))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        model.removeQueuedSync(item.id)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Remove \(item.playlist.name) from queue")
+                    .accessibilityLabel("Remove \(item.playlist.name) from sync queue")
+                }
+            }
+            if compact, model.queuedSyncCount > displayedItems.count {
+                Text("+\(model.queuedSyncCount - displayedItems.count) more in Activity")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .padding(12)
+        .background(Color.accentColor.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.15))
+        }
+    }
+
+    private func queuedLabel(_ date: Date) -> String {
+        if abs(date.timeIntervalSinceNow) < 60 { return "queued just now" }
+        return "queued \(date.relativeLabel)"
     }
 }
 
@@ -895,10 +1043,68 @@ struct SettingsScreen: View {
                         Toggle("Allow YouTube fallback by default", isOn: configBinding(\.allowYouTubeFallback))
                         Text("If Soulseek has no suitable candidate, allow yt-dlp to try YouTube. This may increase coverage but does not guarantee the preferred format.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Toggle("Look for preferred quality on every sync", isOn: configBinding(\.lookForPreferredQuality))
+                        Toggle("Look for preferred quality on every sync", isOn: preferredQualityCheckBinding)
+                            .disabled(model.settings.isLibraryReuseEnabled)
                         Text("Uses Sockseek's indexed-file check. A lossy file is revisited while FLAC is preferred; this is not a general audio-quality comparison.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Toggle("Write an M3U playlist", isOn: configBinding(\.writeM3UPlaylist))
+                        if model.settings.isLibraryReuseEnabled {
+                            Text("Preferred-condition checking stays on while library reuse is enabled so only qualifying local files become references.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Toggle("Write an M3U playlist", isOn: writePlaylistBinding)
+                            .disabled(model.settings.isLibraryReuseEnabled)
+                        if model.settings.isLibraryReuseEnabled {
+                            Text("M3U output stays on while library reuse is enabled so referenced tracks are recorded in the playlist.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(4)
+                }
+
+                GroupBox("Existing music library") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Toggle(
+                            "Reuse tracks that meet the preferred conditions",
+                            isOn: libraryReuseBinding
+                        )
+                        Text("Before a sync, SeekSync can compare the playlist with another music folder. Qualifying files meet the audio target and Sockseek's matching conditions; they are referenced by their original path in the generated M3U playlist and are not copied or downloaded again.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Turning this off stops discovering new library references. References already recorded in a playlist's stable index remain visible and usable until that track is replaced.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Divider()
+                        LabeledContent("Music library folder") {
+                            HStack(spacing: 8) {
+                                Text(model.settings.libraryDirectoryPath.isEmpty ? "Not selected" : model.settings.libraryDirectoryPath)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .textSelection(.enabled)
+                                Button {
+                                    chooseExistingLibraryDirectory()
+                                } label: {
+                                    Label("Choose…", systemImage: "folder.badge.plus")
+                                }
+                            }
+                        }
+
+                        if model.settings.isLibraryReuseEnabled, let blocker = model.libraryReuseBlocker {
+                            Label(blocker, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                        } else if model.settings.isLibraryReuseEnabled {
+                            Label("Ready for read-only playlist previews", systemImage: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        }
+
+                        Text("The preview uses Sockseek’s tag matcher and preferred conditions without contacting Soulseek or writing to your music folders.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
                     .padding(4)
                 }
@@ -1155,6 +1361,18 @@ struct SettingsScreen: View {
         )
     }
 
+    private var writePlaylistBinding: Binding<Bool> {
+        model.settings.isLibraryReuseEnabled
+            ? .constant(true)
+            : configBinding(\.writeM3UPlaylist)
+    }
+
+    private var preferredQualityCheckBinding: Binding<Bool> {
+        model.settings.isLibraryReuseEnabled
+            ? .constant(true)
+            : configBinding(\.lookForPreferredQuality)
+    }
+
     private var preferredBitrateBinding: Binding<String> {
         Binding(
             get: { model.settings.preferredMinBitrateConfigValue },
@@ -1178,6 +1396,13 @@ struct SettingsScreen: View {
                 if newValue { showArmConfirmation = true }
                 else { model.setLiveSchedulingArmed(false) }
             }
+        )
+    }
+
+    private var libraryReuseBinding: Binding<Bool> {
+        Binding(
+            get: { model.settings.isLibraryReuseEnabled },
+            set: { model.setLibraryReuseEnabled($0) }
         )
     }
 
@@ -1263,6 +1488,27 @@ struct SettingsScreen: View {
             guard candidate != NSString(string: model.settings.outputDirectory).expandingTildeInPath else { return }
             outputDirectoryCandidate = candidate
             showOutputDirectoryDecision = true
+        }
+    }
+
+    private func chooseExistingLibraryDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Existing Music Library"
+        panel.message = "Choose a folder SeekSync may inspect for qualifying playlist tracks. Files stay in place."
+        panel.prompt = "Use Library"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = false
+        panel.allowsMultipleSelection = false
+        if !model.settings.libraryDirectoryPath.isEmpty {
+            panel.directoryURL = URL(
+                fileURLWithPath: NSString(string: model.settings.libraryDirectoryPath).expandingTildeInPath,
+                isDirectory: true
+            )
+        }
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            model.setLibraryDirectory(url.standardizedFileURL.path)
         }
     }
 

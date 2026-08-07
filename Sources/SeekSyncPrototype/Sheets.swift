@@ -60,6 +60,7 @@ struct SyncPreviewSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
     @State private var showsCommand = false
+    @State private var showsTrackList = false
     let pending: PendingSync
 
     private var policyBinding: Binding<YouTubePolicy> {
@@ -117,12 +118,75 @@ struct SyncPreviewSheet: View {
                         Divider().frame(height: 44).padding(.horizontal, 16)
                         SyncSummaryItem(
                             label: "Quality check",
-                            value: model.settings.lookForPreferredQuality ? "On" : "Off",
+                            value: model.settings.lookForPreferredQuality || model.settings.isLibraryReuseEnabled ? "On" : "Off",
                             systemImage: "checkmark.seal"
                         )
                     }
                     .padding(16)
                     .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    if model.settings.isLibraryReuseEnabled, isLiveSync {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Existing-library preview")
+                                        .font(.headline)
+                                    Text("Read-only · no Soulseek connection or music-file changes")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if model.isAnalyzingLibrary(for: pending.playlist.id) {
+                                    ProgressView()
+                                        .controlSize(.small)
+                                } else {
+                                    Button(model.libraryAnalysis(for: pending.playlist.id) == nil ? "Analyze Library" : "Refresh Analysis") {
+                                        model.analyzeLibraryReuse(for: pending.playlist)
+                                    }
+                                    .controlSize(.small)
+                                    .disabled(model.libraryReuseBlocker != nil)
+                                }
+                            }
+
+                            if model.isAnalyzingLibrary(for: pending.playlist.id) {
+                                Text(model.libraryAnalysisMessages[pending.playlist.id] ?? "Reading playlist metadata and comparing local tag matches…")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            } else if let analysis = model.libraryAnalysis(for: pending.playlist.id) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    if !model.isLibraryAnalysisCurrent(
+                                        analysis,
+                                        for: model.allPlaylists.first(where: { $0.id == pending.playlist.id }) ?? pending.playlist
+                                    ) {
+                                        Label(
+                                            "This preview uses an earlier playlist snapshot, library folder, or set of reuse conditions. Refresh it before relying on these counts.",
+                                            systemImage: "exclamationmark.triangle.fill"
+                                        )
+                                        .font(.caption)
+                                        .foregroundStyle(.orange)
+                                    }
+                                    LibraryReuseAnalysisSummaryCard(analysis: analysis) {
+                                        showsTrackList = true
+                                    }
+                                    if let message = model.libraryAnalysisMessages[pending.playlist.id] {
+                                        Label(message, systemImage: message.localizedCaseInsensitiveContains("but") ? "exclamationmark.triangle.fill" : "info.circle")
+                                            .font(.caption)
+                                            .foregroundStyle(message.localizedCaseInsensitiveContains("but") ? Color.orange : Color.secondary)
+                                    }
+                                }
+                            } else if let message = model.libraryAnalysisMessages[pending.playlist.id] {
+                                Label(message, systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.red)
+                            } else {
+                                Text("Analyze before confirming to see which files will be referenced, which local copies fall below the target, and which tracks still need a download.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(14)
+                        .background(.quaternary.opacity(0.24), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
 
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
@@ -172,7 +236,9 @@ struct SyncPreviewSheet: View {
                     } else if isLiveSync {
                         SyncNotice(
                             title: "This starts a real download",
-                            detail: "Sockseek will search for missing or below-target tracks. Files already meeting your target are left alone.",
+                            detail: model.settings.isLibraryReuseEnabled
+                                ? "Sockseek will reference qualifying files from your existing library and search for missing or below-target tracks. Referenced files stay in place."
+                                : "Sockseek will search for missing or below-target tracks. Files already meeting your target are left alone.",
                             systemImage: "arrow.down.circle.fill",
                             color: .orange
                         )
@@ -190,9 +256,14 @@ struct SyncPreviewSheet: View {
 
             Divider()
             HStack {
+                if model.activeRun != nil, startBlocker == nil {
+                    Text("This playlist will start automatically when the current sync finishes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(isLiveSync ? "Start Sync" : "Run Preview") {
+                Button(primaryButtonTitle) {
                     model.confirmPendingSync()
                     dismiss()
                 }
@@ -204,8 +275,13 @@ struct SyncPreviewSheet: View {
             .padding(.vertical, 14)
             .background(.bar)
         }
-        .frame(width: 660, height: 520)
+        .frame(width: 680, height: 660)
         .background(Color(nsColor: .windowBackgroundColor))
+        .sheet(isPresented: $showsTrackList) {
+            if let analysis = model.libraryAnalysis(for: pending.playlist.id) {
+                PlaylistTrackListSheet(analysis: analysis)
+            }
+        }
     }
 
     private var playlistSubtitle: String {
@@ -229,14 +305,27 @@ struct SyncPreviewSheet: View {
     }
 
     private var startBlocker: String? {
-        if model.activeRun != nil { return "Another sync is already running." }
+        if model.activeRun?.playlistID == pending.playlist.id {
+            return "This playlist is already syncing."
+        }
+        if model.isQueued(pending.playlist.id) {
+            return "This playlist is already in the sync queue."
+        }
         if pending.playlist.executionKind == .sockseek, model.isConfigDirty {
             return "Save or reload the edited settings before starting a live run."
         }
         if pending.playlist.executionKind == .sockseek, !model.dependencyState.isReady {
             return "Sockseek 3 must be ready before a live run can start."
         }
+        if pending.playlist.executionKind == .sockseek, let blocker = model.libraryReuseBlocker {
+            return blocker
+        }
         return nil
+    }
+
+    private var primaryButtonTitle: String {
+        if model.activeRun != nil { return isLiveSync ? "Queue Sync" : "Queue Preview" }
+        return isLiveSync ? "Start Sync" : "Run Preview"
     }
 }
 
@@ -358,7 +447,7 @@ struct BatchSyncPreviewSheet: View {
                     } else if hasLiveSyncs {
                         SyncNotice(
                             title: "This starts real downloads",
-                            detail: "Each playlist will search for missing or below-target tracks after you confirm. The remaining queue stops if you cancel.",
+                            detail: "Each playlist will search for missing or below-target tracks after you confirm. Cancelling the current sync advances to the next queued playlist.",
                             systemImage: "arrow.down.circle.fill",
                             color: .orange
                         )
@@ -379,7 +468,7 @@ struct BatchSyncPreviewSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(hasLiveSyncs ? "Start \(pending.playlists.count) Syncs" : "Run \(pending.playlists.count) Previews") {
+                Button(batchButtonTitle) {
                     model.confirmPendingBatchSync()
                     dismiss()
                 }
@@ -401,14 +490,23 @@ struct BatchSyncPreviewSheet: View {
     }
 
     private var startBlocker: String? {
-        if model.activeRun != nil { return "Another sync is already running." }
         if hasLiveSyncs, model.isConfigDirty {
             return "Save or reload the edited settings before starting live syncs."
         }
         if hasLiveSyncs, !model.dependencyState.isReady {
             return "Sockseek 3 must be ready before live syncs can start."
         }
+        if hasLiveSyncs, let blocker = model.libraryReuseBlocker {
+            return blocker
+        }
         return nil
+    }
+
+    private var batchButtonTitle: String {
+        if model.activeRun != nil {
+            return hasLiveSyncs ? "Queue \(pending.playlists.count) Syncs" : "Queue \(pending.playlists.count) Previews"
+        }
+        return hasLiveSyncs ? "Start \(pending.playlists.count) Syncs" : "Run \(pending.playlists.count) Previews"
     }
 }
 
