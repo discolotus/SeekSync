@@ -52,6 +52,7 @@ struct RootPrototypeView: View {
                 }
                 .help(inspectorPresented ? "Hide playlist inspector" : "Show playlist inspector")
                 .accessibilityLabel(inspectorPresented ? "Hide playlist inspector" : "Show playlist inspector")
+                .disabled(model.selectedSection == .batchSync)
             }
         }
         .sheet(isPresented: $showAddPlaylist) {
@@ -60,6 +61,10 @@ struct RootPrototypeView: View {
         }
         .sheet(item: $model.pendingSync) { pending in
             SyncPreviewSheet(pending: pending)
+                .environmentObject(model)
+        }
+        .sheet(item: $model.pendingBatchSync) { pending in
+            BatchSyncPreviewSheet(pending: pending)
                 .environmentObject(model)
         }
         .onChange(of: model.selectedPlaylistID) { _, playlistID in

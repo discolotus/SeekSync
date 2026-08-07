@@ -12,6 +12,7 @@ struct AppSidebar: View {
             List(selection: $model.selectedSection) {
                 Section("Library") {
                     sidebarRow(.playlists, badge: nil)
+                    sidebarRow(.batchSync, badge: model.queuedSyncCount)
                     sidebarRow(.syncPool, badge: model.plans.count)
                 }
                 Section("Runs") {
@@ -72,6 +73,211 @@ struct AppSidebar: View {
         case .failed: return .red
         default: return .neutral
         }
+    }
+}
+
+struct BatchSyncScreen: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var searchText = ""
+    @State private var selectedPlaylistIDs: Set<String> = []
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 156, maximum: 210), spacing: 14, alignment: .top)
+    ]
+
+    private var playlists: [Playlist] {
+        PlaylistLibrary.filtered(model.allPlaylists, searchText: searchText)
+    }
+
+    private var selectedPlaylists: [Playlist] {
+        model.allPlaylists.filter { selectedPlaylistIDs.contains($0.id) }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 14) {
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .bottom) {
+                        heading
+                        Spacer()
+                        selectionButtons
+                    }
+                    VStack(alignment: .leading, spacing: 10) {
+                        heading
+                        selectionButtons
+                    }
+                }
+
+                HStack(spacing: 10) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundStyle(.secondary)
+                        TextField("Search playlists", text: $searchText)
+                            .textFieldStyle(.plain)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(.quaternary.opacity(0.45), in: RoundedRectangle(cornerRadius: 8))
+
+                    StatusPill(
+                        text: "\(playlists.count) shown",
+                        systemImage: nil
+                    )
+                }
+
+                if let activeRun = model.activeRun {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("Syncing \(activeRun.playlistName)")
+                            .font(.callout.weight(.medium))
+                            .lineLimit(1)
+                        if model.queuedSyncCount > 0 {
+                            Text("· \(model.queuedSyncCount) queued")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button(model.queuedSyncCount > 0 ? "Cancel batch" : "Cancel sync") {
+                            model.cancelActiveRun()
+                        }
+                        .controlSize(.small)
+                    }
+                    .padding(10)
+                    .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 9))
+                }
+            }
+            .padding(20)
+
+            Divider()
+
+            if playlists.isEmpty {
+                EmptyStateView(
+                    systemImage: "magnifyingglass",
+                    title: "No playlists match",
+                    detail: "Try a different name, owner, or description."
+                )
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, alignment: .leading, spacing: 14) {
+                        ForEach(playlists) { playlist in
+                            BatchPlaylistCard(
+                                playlist: playlist,
+                                isSelected: selectedPlaylistIDs.contains(playlist.id),
+                                action: { toggleSelection(for: playlist) }
+                            )
+                        }
+                    }
+                    .padding(16)
+                }
+            }
+
+            Divider()
+            HStack(spacing: 12) {
+                if selectedPlaylists.isEmpty {
+                    Text("Select playlists to create a one-time sync queue.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("\(selectedPlaylists.count) selected")
+                        .font(.headline)
+                    Text(trackSummary)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    model.showBatchSyncPreview(for: selectedPlaylists)
+                } label: {
+                    Label("Review & Sync", systemImage: "arrow.down.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(selectedPlaylists.isEmpty || model.activeRun != nil)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .background(.bar)
+        }
+    }
+
+    private var heading: some View {
+        SectionHeader(
+            eyebrow: "One-time queue",
+            title: "Batch sync",
+            detail: "Choose several playlists, then review and run them one at a time."
+        )
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private var selectionButtons: some View {
+        HStack {
+            Button("Select shown") {
+                selectedPlaylistIDs.formUnion(playlists.map(\.id))
+            }
+            .disabled(playlists.isEmpty || playlists.allSatisfy { selectedPlaylistIDs.contains($0.id) })
+            Button("Clear") { selectedPlaylistIDs.removeAll() }
+                .disabled(selectedPlaylistIDs.isEmpty)
+        }
+    }
+
+    private var trackSummary: String {
+        let total = selectedPlaylists.reduce(0) { $0 + $1.trackCount }
+        return total > 0 ? "· \(total) known tracks" : ""
+    }
+
+    private func toggleSelection(for playlist: Playlist) {
+        if selectedPlaylistIDs.contains(playlist.id) {
+            selectedPlaylistIDs.remove(playlist.id)
+        } else {
+            selectedPlaylistIDs.insert(playlist.id)
+        }
+    }
+}
+
+private struct BatchPlaylistCard: View {
+    let playlist: Playlist
+    let isSelected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                ZStack(alignment: .topTrailing) {
+                    PlaylistArtwork(playlist: playlist, size: 116)
+                        .frame(maxWidth: .infinity)
+                    Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                        .font(.title2)
+                        .symbolRenderingMode(.palette)
+                        .foregroundStyle(isSelected ? Color.white : Color.white.opacity(0.9), isSelected ? Color.accentColor : Color.black.opacity(0.35))
+                        .padding(7)
+                        .accessibilityHidden(true)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(playlist.name)
+                        .font(.headline)
+                        .lineLimit(2)
+                    Text(playlist.owner)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    Text(playlist.trackCount == 0 ? "Tracks load at sync" : "\(playlist.trackCount) tracks")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(
+                isSelected ? Color.accentColor.opacity(0.11) : Color(nsColor: .controlBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 13, style: .continuous)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .stroke(isSelected ? Color.accentColor : Color.secondary.opacity(0.18), lineWidth: isSelected ? 2 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(playlist.name), \(playlist.owner), \(playlist.trackCount == 0 ? "track count loads at sync" : "\(playlist.trackCount) tracks")")
+        .accessibilityValue(isSelected ? "Selected" : "Not selected")
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
 }
 

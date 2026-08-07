@@ -2,6 +2,7 @@ import Foundation
 
 enum AppSection: String, CaseIterable, Identifiable, Codable {
     case playlists = "Playlists"
+    case batchSync = "Batch Sync"
     case syncPool = "Sync Pool"
     case activity = "Activity"
     case attention = "Needs Attention"
@@ -12,6 +13,7 @@ enum AppSection: String, CaseIterable, Identifiable, Codable {
     var systemImage: String {
         switch self {
         case .playlists: return "music.note.list"
+        case .batchSync: return "square.grid.2x2"
         case .syncPool: return "arrow.triangle.2.circlepath"
         case .activity: return "clock.arrow.circlepath"
         case .attention: return "exclamationmark.triangle"
@@ -228,6 +230,16 @@ enum PlaylistLibrary {
     static func indexedByID(_ playlists: [Playlist]) -> [String: Playlist] {
         playlists.reduce(into: [:]) { indexed, playlist in
             if indexed[playlist.id] == nil { indexed[playlist.id] = playlist }
+        }
+    }
+
+    static func filtered(_ playlists: [Playlist], searchText: String) -> [Playlist] {
+        let needle = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !needle.isEmpty else { return playlists }
+        return playlists.filter {
+            $0.name.lowercased().contains(needle)
+                || $0.owner.lowercased().contains(needle)
+                || $0.detail.lowercased().contains(needle)
         }
     }
 

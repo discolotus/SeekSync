@@ -50,6 +50,17 @@ final class SeekSyncVisualRenderTests: XCTestCase {
         .frame(width: 1_180, height: 720)
         .background(Color(nsColor: .windowBackgroundColor))
 
+        model.selectedSection = .batchSync
+        let batchSync = BatchSyncScreen()
+            .environmentObject(model)
+            .frame(width: 980, height: 720)
+            .background(Color(nsColor: .windowBackgroundColor))
+
+        model.showBatchSyncPreview(for: Array(Playlist.samples.prefix(3)))
+        let pendingBatchSync = try XCTUnwrap(model.pendingBatchSync)
+        let batchSyncPreview = BatchSyncPreviewSheet(pending: pendingBatchSync)
+            .environmentObject(model)
+
         let settings = SettingsScreen()
             .environmentObject(model)
             .frame(width: 660, height: 560)
@@ -69,6 +80,8 @@ final class SeekSyncVisualRenderTests: XCTestCase {
 
         let compactPNG = try renderPNG(AnyView(compact), size: NSSize(width: 994, height: 624))
         let standardPNG = try renderPNG(AnyView(standard), size: NSSize(width: 1_180, height: 720))
+        let batchSyncPNG = try renderPNG(AnyView(batchSync), size: NSSize(width: 980, height: 720))
+        let batchSyncPreviewPNG = try renderPNG(AnyView(batchSyncPreview), size: NSSize(width: 680, height: 620))
         let settingsPNG = try renderPNG(AnyView(settings), size: NSSize(width: 660, height: 560))
         let syncPreviewPNG = try renderPNG(AnyView(syncPreview), size: NSSize(width: 660, height: 520))
         let liveSyncPreviewPNG = try renderPNG(AnyView(liveSyncPreview), size: NSSize(width: 660, height: 520))
@@ -160,6 +173,8 @@ final class SeekSyncVisualRenderTests: XCTestCase {
 
         XCTAssertGreaterThan(compactPNG.count, 10_000)
         XCTAssertGreaterThan(standardPNG.count, 10_000)
+        XCTAssertGreaterThan(batchSyncPNG.count, 10_000)
+        XCTAssertGreaterThan(batchSyncPreviewPNG.count, 10_000)
         XCTAssertGreaterThan(settingsPNG.count, 10_000)
         XCTAssertGreaterThan(syncPreviewPNG.count, 10_000)
         XCTAssertGreaterThan(liveSyncPreviewPNG.count, 10_000)
@@ -172,6 +187,8 @@ final class SeekSyncVisualRenderTests: XCTestCase {
             try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
             try compactPNG.write(to: outputDirectory.appendingPathComponent("implementation-compact-994x624@2x.png"), options: .atomic)
             try standardPNG.write(to: outputDirectory.appendingPathComponent("implementation-standard-1180x720@2x.png"), options: .atomic)
+            try batchSyncPNG.write(to: outputDirectory.appendingPathComponent("implementation-batch-sync-980x720@2x.png"), options: .atomic)
+            try batchSyncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-batch-sync-preview-680x620@2x.png"), options: .atomic)
             try settingsPNG.write(to: outputDirectory.appendingPathComponent("implementation-settings-660x560@2x.png"), options: .atomic)
             try syncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-sync-preview-660x520@2x.png"), options: .atomic)
             try liveSyncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-live-sync-preview-660x520@2x.png"), options: .atomic)
@@ -990,6 +1007,15 @@ final class PlaylistSyncOutcomeTests: XCTestCase {
 }
 
 final class PlaylistLibraryTests: XCTestCase {
+    func testSearchMatchesPlaylistNameOwnerAndDescriptionCaseInsensitively() {
+        let playlists = Array(Playlist.samples.prefix(3))
+
+        XCTAssertEqual(PlaylistLibrary.filtered(playlists, searchText: "MIDNIGHT").map(\.id), [playlists[0].id])
+        XCTAssertEqual(PlaylistLibrary.filtered(playlists, searchText: "spotify").map(\.id), [playlists[1].id])
+        XCTAssertEqual(PlaylistLibrary.filtered(playlists, searchText: "dance-floor").map(\.id), [playlists[2].id])
+        XCTAssertEqual(PlaylistLibrary.filtered(playlists, searchText: "   ").count, playlists.count)
+    }
+
     func testLiveCatalogReplacesMatchingURLPlaceholderWithoutDroppingUniqueImports() {
         var placeholder = Playlist.samples[0]
         placeholder.name = "Imported Spotify playlist"

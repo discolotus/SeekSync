@@ -8,6 +8,19 @@ struct PendingSync: Identifiable {
     var youtubePolicy: YouTubePolicy
 }
 
+struct PendingBatchSync: Identifiable {
+    let id = UUID()
+    let playlists: [Playlist]
+    var youtubePolicy: YouTubePolicy
+}
+
+struct SyncQueueItem: Identifiable, Equatable {
+    let id = UUID()
+    let playlist: Playlist
+    let trigger: SyncTrigger
+    let youtubePolicy: YouTubePolicy
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     @Published var selectedSection: AppSection = .playlists
@@ -22,6 +35,8 @@ final class AppModel: ObservableObject {
     @Published var dependencyState: DependencyState = .checking
     @Published var spotifyState: SpotifyConnectionState = .demo
     @Published var pendingSync: PendingSync?
+    @Published var pendingBatchSync: PendingBatchSync?
+    @Published private(set) var syncQueue: [SyncQueueItem] = []
     @Published var toastMessage: String?
     @Published var configMessage = "Loaded without changing the file."
     @Published var isConfigDirty = false
@@ -116,13 +131,7 @@ final class AppModel: ObservableObject {
     }
 
     var filteredPlaylists: [Playlist] {
-        guard !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return allPlaylists }
-        let needle = searchText.lowercased()
-        return allPlaylists.filter {
-            $0.name.lowercased().contains(needle)
-                || $0.owner.lowercased().contains(needle)
-                || $0.detail.lowercased().contains(needle)
-        }
+        PlaylistLibrary.filtered(allPlaylists, searchText: searchText)
     }
 
     var selectedPlaylist: Playlist? {
@@ -137,6 +146,7 @@ final class AppModel: ObservableObject {
     var activeRun: SyncRun? { runs.first(where: { $0.phase.isActive }) }
     var attentionCount: Int { allPlaylists.filter(needsAttention).count }
     var enabledPlanCount: Int { plans.filter { $0.enabled && playlist(for: $0) != nil }.count }
+    var queuedSyncCount: Int { syncQueue.count }
 
     func playlist(for plan: SyncPlan) -> Playlist? {
         allPlaylists.first { $0.id == plan.playlistID }
@@ -168,6 +178,14 @@ final class AppModel: ObservableObject {
             trigger: trigger,
             youtubePolicy: plan(for: playlist.id)?.youtubePolicy ?? .inherit
         )
+    }
+
+    func showBatchSyncPreview(for playlists: [Playlist]) {
+        let unique = playlists.reduce(into: [Playlist]()) { result, playlist in
+            if !result.contains(where: { $0.id == playlist.id }) { result.append(playlist) }
+        }
+        guard !unique.isEmpty else { return }
+        pendingBatchSync = PendingBatchSync(playlists: unique, youtubePolicy: .inherit)
     }
 
     func togglePlan(for playlist: Playlist) {
@@ -237,6 +255,29 @@ final class AppModel: ObservableObject {
         startSync(playlist: pendingSync.playlist, trigger: pendingSync.trigger, youtubePolicy: pendingSync.youtubePolicy)
     }
 
+    func confirmPendingBatchSync() {
+        guard let pending = pendingBatchSync else { return }
+        pendingBatchSync = nil
+        guard activeRun == nil else {
+            toastMessage = "Another sync is already running."
+            return
+        }
+        let hasLiveSync = pending.playlists.contains { $0.executionKind == .sockseek }
+        if hasLiveSync, !dependencyState.isReady {
+            toastMessage = "Sockseek 3 must be ready before live syncs can start."
+            return
+        }
+        if hasLiveSync, isConfigDirty {
+            toastMessage = "Save or reload the edited settings before starting live syncs."
+            return
+        }
+
+        syncQueue = pending.playlists.map {
+            SyncQueueItem(playlist: $0, trigger: .manual, youtubePolicy: pending.youtubePolicy)
+        }
+        startNextQueuedSync()
+    }
+
     func command(for pending: PendingSync) -> SLDLCommand {
         commandBuilder.command(for: pending.playlist, settings: settings, youtubePolicy: pending.youtubePolicy)
     }
@@ -247,6 +288,10 @@ final class AppModel: ObservableObject {
             settings: settings,
             youtubePolicy: plan(for: playlist.id)?.youtubePolicy ?? .inherit
         )
+    }
+
+    func command(for playlist: Playlist, youtubePolicy: YouTubePolicy) -> SLDLCommand {
+        commandBuilder.command(for: playlist, settings: settings, youtubePolicy: youtubePolicy)
     }
 
     func refreshSpotify() {
@@ -509,8 +554,19 @@ final class AppModel: ObservableObject {
 
     func cancelActiveRun() {
         guard let active = activeRun else { return }
+        let cancelledQueueCount = syncQueue.count
+        syncQueue.removeAll()
         updateRun(active.id) { $0.message = "Cancelling…" }
         activeRunTask?.cancel()
+        if cancelledQueueCount > 0 {
+            toastMessage = "Cancelling the current sync and cleared \(cancelledQueueCount) queued playlist\(cancelledQueueCount == 1 ? "" : "s")."
+        }
+    }
+
+    private func startNextQueuedSync() {
+        guard activeRun == nil, !syncQueue.isEmpty else { return }
+        let next = syncQueue.removeFirst()
+        startSync(playlist: next.playlist, trigger: next.trigger, youtubePolicy: next.youtubePolicy)
     }
 
     private func startSync(playlist: Playlist, trigger: SyncTrigger, youtubePolicy: YouTubePolicy) {
@@ -707,6 +763,7 @@ final class AppModel: ObservableObject {
             plans[index].nextRunAt = nextDailyRun(after: Date())
         }
         persist()
+        startNextQueuedSync()
     }
 
     private func updatePlaylistOutcome(for playlistID: String, phase: RunPhase, counts: RunCounts) {
