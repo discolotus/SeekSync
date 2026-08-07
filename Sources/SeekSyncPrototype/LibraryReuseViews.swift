@@ -1,6 +1,46 @@
 import Foundation
 import SwiftUI
 
+/// The running commentary for a library preview: stage progress while a pass
+/// is in flight, and the outcome afterwards.
+///
+/// A preview that fails leaves no analysis behind, so without this the detail
+/// screen would answer a press of "Preview Library Reuse" with nothing at all.
+struct LibraryAnalysisStatusLabel: View {
+    let message: String?
+    let isAnalyzing: Bool
+    let hasAnalysis: Bool
+
+    var body: some View {
+        if isAnalyzing {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                ProgressView()
+                    .controlSize(.small)
+                Text(message ?? "Reading playlist metadata and comparing local tag matches…")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else if let message {
+            Label(message, systemImage: symbolName(for: message))
+                .font(.caption)
+                .foregroundStyle(style(for: message))
+        }
+    }
+
+    private var isFailure: Bool { !hasAnalysis }
+
+    private func symbolName(for message: String) -> String {
+        isFailure || message.localizedCaseInsensitiveContains("but")
+            ? "exclamationmark.triangle.fill"
+            : "info.circle"
+    }
+
+    private func style(for message: String) -> Color {
+        if isFailure { return .red }
+        return message.localizedCaseInsensitiveContains("but") ? .orange : .secondary
+    }
+}
+
 /// A compact, reusable readout for a completed library-reuse analysis.
 ///
 /// The card intentionally distinguishes a qualifying library reference from a

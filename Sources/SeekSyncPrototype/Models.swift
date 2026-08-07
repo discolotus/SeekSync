@@ -2,6 +2,7 @@ import Foundation
 
 enum AppSection: String, CaseIterable, Identifiable, Codable {
     case playlists = "Playlists"
+    case inventory = "Track Inventory"
     case batchSync = "Batch Sync"
     case syncPool = "Sync Pool"
     case activity = "Activity"
@@ -13,6 +14,7 @@ enum AppSection: String, CaseIterable, Identifiable, Codable {
     var systemImage: String {
         switch self {
         case .playlists: return "music.note.list"
+        case .inventory: return "square.stack.3d.up"
         case .batchSync: return "square.grid.2x2"
         case .syncPool: return "arrow.triangle.2.circlepath"
         case .activity: return "clock.arrow.circlepath"

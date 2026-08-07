@@ -53,6 +53,12 @@ For Xcode, open `Package.swift`, select the **SeekSyncPrototype** scheme, and us
   playlist index, so it can distinguish references, prior downloads,
   below-target files, and downloads needed without connecting to Soulseek or
   changing music files.
+- A read-only Track Inventory section gathers every previewed track across all
+  playlists into one searchable list, stating whether each song already exists
+  on this Mac and whether a playlist can link to it as it stands.
+- Repeat previews of an unchanged library reuse the cached Sockseek index
+  instead of rebuilding the music-directory tag index on both passes. A
+  file-count, size, and modification stamp of the library invalidates it.
 - Real Spotify and pasted-URL playlists start Sockseek only after an explicit sync preview confirmation. Built-in demo playlists remain preview-only, and unattended live scheduling has a second, explicit arm control.
 - Real Sockseek config reading and comment/order-preserving updates after an explicit save, with backup and external-change detection.
 - Activity history, dependency health, settings, and a menu-bar status surface.
