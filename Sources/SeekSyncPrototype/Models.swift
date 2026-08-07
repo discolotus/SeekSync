@@ -438,6 +438,9 @@ struct ClientSettings: Codable, Equatable {
     // SeekSync versions decodable without a migration step.
     var libraryReuseEnabled: Bool?
     var libraryDirectory: String?
+    // Sockseek has no rekordbox support, so this preference must never reach
+    // the user's config file. It lives with the other app-local settings.
+    var rekordboxXMLEnabled: Bool?
 
     var soulseekUsername = ""
     var soulseekPassword = ""
@@ -471,6 +474,8 @@ struct ClientSettings: Codable, Equatable {
     var isLiveSchedulingArmed: Bool { liveSchedulingArmed == true }
 
     var isLibraryReuseEnabled: Bool { libraryReuseEnabled == true }
+
+    var isRekordboxXMLEnabled: Bool { rekordboxXMLEnabled ?? true }
 
     var libraryDirectoryPath: String {
         libraryDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""

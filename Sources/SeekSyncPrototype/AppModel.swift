@@ -102,13 +102,7 @@ final class AppModel: ObservableObject {
                 binaryPath: detectedBinary,
                 preferredProfile: settings.profileName
             )
-            let prototypeOnly = settings
-            settings = loaded.settings
-            settings.dailyHour = prototypeOnly.dailyHour
-            settings.dailyMinute = prototypeOnly.dailyMinute
-            settings.liveSchedulingArmed = prototypeOnly.liveSchedulingArmed
-            settings.libraryReuseEnabled = prototypeOnly.libraryReuseEnabled
-            settings.libraryDirectory = prototypeOnly.libraryDirectory
+            settings = loaded.settings.mergingPrototypePreferences(from: settings)
             configDocument = loaded.document
             configRevision = loaded.revision
             loadedConfigURL = detectedConfig.standardizedFileURL
@@ -424,13 +418,7 @@ final class AppModel: ObservableObject {
                 binaryPath: settings.binaryPath,
                 preferredProfile: settings.profileName
             )
-            let prototypeOnly = settings
-            settings = loaded.settings
-            settings.dailyHour = prototypeOnly.dailyHour
-            settings.dailyMinute = prototypeOnly.dailyMinute
-            settings.liveSchedulingArmed = prototypeOnly.liveSchedulingArmed
-            settings.libraryReuseEnabled = prototypeOnly.libraryReuseEnabled
-            settings.libraryDirectory = prototypeOnly.libraryDirectory
+            settings = loaded.settings.mergingPrototypePreferences(from: settings)
             configDocument = loaded.document
             configRevision = loaded.revision
             loadedConfigURL = URL(fileURLWithPath: path).standardizedFileURL
@@ -646,6 +634,15 @@ final class AppModel: ObservableObject {
             toastMessage = enabled
                 ? "Existing-library references enabled."
                 : "Existing-library references disabled."
+        }
+    }
+
+    func setRekordboxXMLEnabled(_ enabled: Bool) {
+        settings.rekordboxXMLEnabled = enabled
+        if persist() {
+            toastMessage = enabled
+                ? "Rekordbox library will be written after each sync."
+                : "Rekordbox library export disabled."
         }
     }
 
@@ -1030,7 +1027,28 @@ final class AppModel: ObservableObject {
             plans[index].nextRunAt = nextDailyRun(after: Date())
         }
         persist()
+        regenerateRekordboxXML()
         startNextQueuedSync()
+    }
+
+    /// Rebuilds the combined rekordbox library from the indices on disk. This
+    /// is a side effect of syncing and must never fail a run, so every error
+    /// stops here.
+    private func regenerateRekordboxXML() {
+        guard settings.isRekordboxXMLEnabled else { return }
+        let sources = RekordboxXMLExporter.sources(
+            for: allPlaylists,
+            outputDirectory: settings.outputDirectory
+        )
+        guard !sources.isEmpty else { return }
+        do {
+            try RekordboxXMLExporter().export(
+                sources: sources,
+                to: RekordboxXMLExporter.exportURL(outputDirectory: settings.outputDirectory)
+            )
+        } catch {
+            toastMessage = "Could not write the rekordbox library: \(error.localizedDescription)"
+        }
     }
 
     private func updatePlaylistOutcome(for playlistID: String, phase: RunPhase, counts: RunCounts) {
@@ -1327,7 +1345,10 @@ private extension String {
     var nilIfEmpty: String? { isEmpty ? nil : self }
 }
 
-private extension ClientSettings {
+extension ClientSettings {
+    /// Carries the settings SeekSync owns over a set of settings just read
+    /// from Sockseek's config. Every app-local preference belongs here, and
+    /// only here, so reloading the config cannot silently drop one.
     func mergingPrototypePreferences(from other: ClientSettings) -> ClientSettings {
         var merged = self
         merged.dailyHour = other.dailyHour
@@ -1335,6 +1356,7 @@ private extension ClientSettings {
         merged.liveSchedulingArmed = other.liveSchedulingArmed
         merged.libraryReuseEnabled = other.libraryReuseEnabled
         merged.libraryDirectory = other.libraryDirectory
+        merged.rekordboxXMLEnabled = other.rekordboxXMLEnabled
         return merged
     }
 }

@@ -3,6 +3,18 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-08-07
+
+- Write a combined rekordbox library, `SeekSync.rekordbox.xml`, beside the
+  downloads folder after each sync, so File → Import Library brings every
+  synced playlist into rekordbox at once instead of one M3U at a time.
+- Describe each downloaded or referenced track once in the collection, even
+  when several playlists share it, and keep each playlist's track order.
+- Add a settings toggle for the export. It is a SeekSync preference and is
+  never written into Sockseek's config.
+- Keep app-local preferences in one merge point so reloading Sockseek's config
+  cannot silently drop one.
+
 ## [0.3.5] - 2026-08-06
 
 - Add an opt-in existing-music-library folder whose qualifying tracks are
