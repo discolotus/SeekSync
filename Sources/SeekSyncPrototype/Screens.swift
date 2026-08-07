@@ -522,6 +522,7 @@ struct RunRow: View {
                 RunCountsView(counts: run.counts)
                 Text(run.message).font(.caption).foregroundStyle(.secondary)
             }
+            TrackFailureDetailsView(run: run)
             DisclosureGroup("Sanitized command", isExpanded: $showCommand) {
                 Text(run.commandPreview)
                     .font(.system(size: 10, design: .monospaced))
@@ -572,21 +573,27 @@ struct AttentionScreen: View {
                 ScrollView {
                     LazyVStack(spacing: 10) {
                         ForEach(playlists) { playlist in
-                            HStack(spacing: 12) {
-                                PlaylistArtwork(playlist: playlist, size: 48)
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(playlist.name).font(.headline)
-                                    Text(attentionDetail(for: playlist))
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Button(opensInspector ? "Inspect" : "Review…") {
-                                    if opensInspector {
-                                        model.select(playlist)
-                                        model.selectedSection = .playlists
-                                    } else {
-                                        model.showSyncPreview(for: playlist)
+                            VStack(alignment: .leading, spacing: 12) {
+                                HStack(spacing: 12) {
+                                    PlaylistArtwork(playlist: playlist, size: 48)
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(playlist.name).font(.headline)
+                                        Text(attentionDetail(for: playlist))
+                                            .font(.caption).foregroundStyle(.secondary)
                                     }
+                                    Spacer()
+                                    Button(opensInspector ? "Inspect" : "Review…") {
+                                        if opensInspector {
+                                            model.select(playlist)
+                                            model.selectedSection = .playlists
+                                        } else {
+                                            model.showSyncPreview(for: playlist)
+                                        }
+                                    }
+                                }
+
+                                if let run = model.latestRun(for: playlist.id) {
+                                    TrackFailureDetailsView(run: run)
                                 }
                             }
                             .padding(14)

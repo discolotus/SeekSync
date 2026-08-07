@@ -252,6 +252,14 @@ enum YouTubePolicy: String, CaseIterable, Identifiable, Codable {
     case never = "Never"
 
     var id: String { rawValue }
+
+    func allowsFallback(using settings: ClientSettings) -> Bool {
+        switch self {
+        case .inherit: return settings.allowYouTubeFallback
+        case .allow: return true
+        case .never: return false
+        }
+    }
 }
 
 struct SyncPlan: Identifiable, Hashable, Codable {
@@ -323,6 +331,8 @@ struct SyncRun: Identifiable, Hashable, Codable {
     var finishedAt: Date?
     var counts: RunCounts
     var progressDetails: SyncProgressSnapshot?
+    var trackFailures: [TrackSyncFailure]?
+    var youtubeFallbackEnabled: Bool?
     var message: String
     var commandPreview: String
 
@@ -337,6 +347,8 @@ struct SyncRun: Identifiable, Hashable, Codable {
         finishedAt: Date? = nil,
         counts: RunCounts = RunCounts(),
         progressDetails: SyncProgressSnapshot? = nil,
+        trackFailures: [TrackSyncFailure]? = nil,
+        youtubeFallbackEnabled: Bool? = nil,
         message: String = "Waiting to start",
         commandPreview: String
     ) {
@@ -350,6 +362,8 @@ struct SyncRun: Identifiable, Hashable, Codable {
         self.finishedAt = finishedAt
         self.counts = counts
         self.progressDetails = progressDetails
+        self.trackFailures = trackFailures
+        self.youtubeFallbackEnabled = youtubeFallbackEnabled
         self.message = message
         self.commandPreview = commandPreview
     }
