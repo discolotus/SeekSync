@@ -26,6 +26,24 @@ final class SeekSyncLayoutModeTests: XCTestCase {
     }
 }
 
+final class SeekSyncVersionTests: XCTestCase {
+    func testDisplaysPackagedAppVersion() {
+        XCTAssertEqual(
+            SeekSyncVersion.label(infoDictionary: ["CFBundleShortVersionString": "0.3.4"]),
+            "SeekSync 0.3.4"
+        )
+        XCTAssertEqual(
+            SeekSyncVersion.shortLabel(infoDictionary: ["CFBundleShortVersionString": "0.3.4"]),
+            "v0.3.4"
+        )
+    }
+
+    func testLabelsUnpackagedSwiftBuildAsDevelopment() {
+        XCTAssertEqual(SeekSyncVersion.label(infoDictionary: nil), "SeekSync development")
+        XCTAssertEqual(SeekSyncVersion.shortLabel(infoDictionary: nil), "dev")
+    }
+}
+
 @MainActor
 final class SeekSyncVisualRenderTests: XCTestCase {
     func testSupportedWindowLayoutsAndSheetsRenderInAppScopedWindows() throws {

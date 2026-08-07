@@ -3,6 +3,15 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.4] - 2026-08-06
+
+- Let individually confirmed playlists join the active sequential sync queue,
+  with visible ordering, duplicate prevention, and per-item removal.
+- Preserve the exact settings snapshot confirmed for each queued sync and
+  advance to the next playlist after completion or cancellation.
+- Display the packaged SeekSync version beside the detected Sockseek version
+  in the sidebar status area.
+
 ## [0.3.3] - 2026-08-06
 
 - Add a searchable playlist grid for selecting and confirming one-time batch

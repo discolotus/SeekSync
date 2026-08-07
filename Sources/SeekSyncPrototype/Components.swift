@@ -1,6 +1,30 @@
 import AppKit
 import SwiftUI
 
+enum SeekSyncVersion {
+    static var label: String {
+        label(infoDictionary: Bundle.main.infoDictionary)
+    }
+
+    static func label(infoDictionary: [String: Any]?) -> String {
+        guard let version = infoDictionary?["CFBundleShortVersionString"] as? String,
+              !version.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "SeekSync development"
+        }
+        return "SeekSync \(version)"
+    }
+
+    static var shortLabel: String {
+        shortLabel(infoDictionary: Bundle.main.infoDictionary)
+    }
+
+    static func shortLabel(infoDictionary: [String: Any]?) -> String {
+        let fullLabel = label(infoDictionary: infoDictionary)
+        guard fullLabel != "SeekSync development" else { return "dev" }
+        return "v" + fullLabel.dropFirst("SeekSync ".count)
+    }
+}
+
 enum SeekSyncBrandAssets {
     static let applicationIcon: NSImage = {
         if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),

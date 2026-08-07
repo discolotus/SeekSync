@@ -26,7 +26,14 @@ struct AppSidebar: View {
             .listStyle(.sidebar)
 
             VStack(alignment: .leading, spacing: 8) {
-                DependencyPill(state: model.dependencyState)
+                HStack(spacing: 6) {
+                    DependencyPill(state: model.dependencyState)
+                    Text(SeekSyncVersion.shortLabel)
+                        .font(.system(size: 9, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .help(SeekSyncVersion.label)
+                        .accessibilityLabel(SeekSyncVersion.label)
+                }
                 StatusPill(
                     text: model.spotifyState.label,
                     systemImage: "music.note",
