@@ -58,10 +58,20 @@ final class SeekSyncVisualRenderTests: XCTestCase {
         let syncPreview = SyncPreviewSheet(pending: pendingSync)
             .environmentObject(model)
 
+        let liveModel = AppModel()
+        var livePlaylist = Playlist.samples[0]
+        livePlaylist.isFixture = false
+        liveModel.dependencyState = .ready(version: "3.0.5")
+        liveModel.showSyncPreview(for: livePlaylist)
+        let livePendingSync = try XCTUnwrap(liveModel.pendingSync)
+        let liveSyncPreview = SyncPreviewSheet(pending: livePendingSync)
+            .environmentObject(liveModel)
+
         let compactPNG = try renderPNG(AnyView(compact), size: NSSize(width: 994, height: 624))
         let standardPNG = try renderPNG(AnyView(standard), size: NSSize(width: 1_180, height: 720))
         let settingsPNG = try renderPNG(AnyView(settings), size: NSSize(width: 660, height: 560))
-        let syncPreviewPNG = try renderPNG(AnyView(syncPreview), size: NSSize(width: 680, height: 500))
+        let syncPreviewPNG = try renderPNG(AnyView(syncPreview), size: NSSize(width: 660, height: 520))
+        let liveSyncPreviewPNG = try renderPNG(AnyView(liveSyncPreview), size: NSSize(width: 660, height: 520))
         let sourceIconURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -108,6 +118,7 @@ final class SeekSyncVisualRenderTests: XCTestCase {
         XCTAssertGreaterThan(standardPNG.count, 10_000)
         XCTAssertGreaterThan(settingsPNG.count, 10_000)
         XCTAssertGreaterThan(syncPreviewPNG.count, 10_000)
+        XCTAssertGreaterThan(liveSyncPreviewPNG.count, 10_000)
         XCTAssertGreaterThan(brandHeaderPNG.count, 8_000)
         XCTAssertGreaterThan(identityComparisonPNG.count, 12_000)
 
@@ -117,7 +128,8 @@ final class SeekSyncVisualRenderTests: XCTestCase {
             try compactPNG.write(to: outputDirectory.appendingPathComponent("implementation-compact-994x624@2x.png"), options: .atomic)
             try standardPNG.write(to: outputDirectory.appendingPathComponent("implementation-standard-1180x720@2x.png"), options: .atomic)
             try settingsPNG.write(to: outputDirectory.appendingPathComponent("implementation-settings-660x560@2x.png"), options: .atomic)
-            try syncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-sync-preview-680x500@2x.png"), options: .atomic)
+            try syncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-sync-preview-660x520@2x.png"), options: .atomic)
+            try liveSyncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-live-sync-preview-660x520@2x.png"), options: .atomic)
             try brandHeaderPNG.write(to: outputDirectory.appendingPathComponent("implementation-brand-header-320x80@2x.png"), options: .atomic)
             try identityComparisonPNG.write(to: outputDirectory.appendingPathComponent("comparison-app-icon-vs-brand-header-640x160@2x.png"), options: .atomic)
         }

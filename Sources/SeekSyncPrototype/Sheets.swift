@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct AddPlaylistSheet: View {
@@ -58,6 +59,7 @@ struct AddPlaylistSheet: View {
 struct SyncPreviewSheet: View {
     @EnvironmentObject private var model: AppModel
     @Environment(\.dismiss) private var dismiss
+    @State private var showsCommand = false
     let pending: PendingSync
 
     private var policyBinding: Binding<YouTubePolicy> {
@@ -71,74 +73,116 @@ struct SyncPreviewSheet: View {
         model.pendingSync ?? pending
     }
 
+    private var isLiveSync: Bool {
+        pending.playlist.executionKind == .sockseek
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
-                    HStack(spacing: 16) {
-                        PlaylistArtwork(playlist: pending.playlist, size: 72)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Sync preview").font(.caption.bold()).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 18) {
+                    HStack(alignment: .top, spacing: 16) {
+                        PlaylistArtwork(playlist: pending.playlist, size: 68)
+                        VStack(alignment: .leading, spacing: 5) {
+                            Label(
+                                isLiveSync ? "READY TO SYNC" : "DEMO PREVIEW",
+                                systemImage: isLiveSync ? "arrow.triangle.2.circlepath" : "eye"
+                            )
+                            .font(.system(size: 10, weight: .bold))
+                            .tracking(0.8)
+                            .foregroundStyle(isLiveSync ? Color.orange : Color.blue)
+
                             Text(pending.playlist.name)
-                                .font(.title2.bold())
+                                .font(.system(size: 24, weight: .bold, design: .rounded))
                                 .lineLimit(2)
-                            Text("\(pending.playlist.trackCount) tracks · \(pending.trigger.rawValue.lowercased()) run")
+                            Text(playlistSubtitle)
+                                .font(.callout)
                                 .foregroundStyle(.secondary)
                         }
-                        Spacer()
-                        StatusPill(
-                            text: pending.playlist.executionKind == .sockseek ? "Real sync" : "Demo preview",
-                            systemImage: pending.playlist.executionKind == .sockseek ? "arrow.down.circle.fill" : "eye.fill",
-                            tone: pending.playlist.executionKind == .sockseek ? .orange : .blue
-                        )
+                        Spacer(minLength: 0)
                     }
 
-                    GroupBox {
-                        VStack(alignment: .leading, spacing: 12) {
-                            LabeledContent("Destination", value: model.settings.outputDirectory)
-                            LabeledContent("Preferred target", value: model.settings.preferredFormatLabel)
-                            LabeledContent(
-                                "Preferred-target recheck",
-                                value: model.settings.lookForPreferredQuality ? "Enabled" : "Disabled"
-                            )
+                    HStack(spacing: 0) {
+                        SyncSummaryItem(
+                            label: "Save to",
+                            value: model.settings.outputDirectory,
+                            systemImage: "folder"
+                        )
+                        Divider().frame(height: 44).padding(.horizontal, 16)
+                        SyncSummaryItem(
+                            label: "Audio target",
+                            value: model.settings.preferredFormatLabel,
+                            systemImage: "waveform"
+                        )
+                        Divider().frame(height: 44).padding(.horizontal, 16)
+                        SyncSummaryItem(
+                            label: "Quality check",
+                            value: model.settings.lookForPreferredQuality ? "On" : "Off",
+                            systemImage: "checkmark.seal"
+                        )
+                    }
+                    .padding(16)
+                    .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("YouTube fallback")
+                                    .font(.headline)
+                                Text("Used only when Soulseek finds no suitable match.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
                             Picker("YouTube fallback", selection: policyBinding) {
                                 ForEach(YouTubePolicy.allCases) { Text($0.rawValue).tag($0) }
                             }
+                            .labelsHidden()
                             .pickerStyle(.segmented)
-                            Text("Fallback is tried only when Soulseek returns no suitable candidate. It can improve coverage, but its output does not automatically satisfy the preferred target.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            .frame(width: 240)
                         }
-                        .padding(4)
-                    } label: {
-                        Label("Effective policy", systemImage: "slider.horizontal.3")
+
+                        Text(fallbackExplanation)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Sanitized command").font(.caption.bold()).foregroundStyle(.secondary)
-                        ScrollView(.horizontal) {
+                    DisclosureGroup(isExpanded: $showsCommand) {
+                        ScrollView(.horizontal, showsIndicators: false) {
                             Text(model.command(for: effectivePending).displayString)
-                                .font(.system(.caption, design: .monospaced))
+                                .font(.system(size: 11, design: .monospaced))
                                 .textSelection(.enabled)
                         }
                         .padding(10)
-                        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
-                    }
-
-                    if pending.playlist.executionKind == .sockseek {
-                        Label("This will start a real Sockseek download process. Existing indexed files are skipped unless they miss the preferred conditions.", systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-                            .font(.callout)
-                    } else {
-                        Label("Demo playlists are preview-only and never change music files.", systemImage: "checkmark.shield.fill")
-                            .foregroundStyle(.blue)
-                            .font(.callout)
+                        .background(.quaternary.opacity(0.35), in: RoundedRectangle(cornerRadius: 8))
+                        .padding(.top, 8)
+                    } label: {
+                        Text("Show sanitized command")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
 
                     if let startBlocker {
-                        Label(startBlocker, systemImage: "xmark.octagon.fill")
-                            .foregroundStyle(.red)
-                            .font(.callout)
+                        SyncNotice(
+                            title: "Sync can’t start yet",
+                            detail: startBlocker,
+                            systemImage: "xmark.octagon.fill",
+                            color: .red
+                        )
+                    } else if isLiveSync {
+                        SyncNotice(
+                            title: "This starts a real download",
+                            detail: "Sockseek will search for missing or below-target tracks. Files already meeting your target are left alone.",
+                            systemImage: "arrow.down.circle.fill",
+                            color: .orange
+                        )
+                    } else {
+                        SyncNotice(
+                            title: "Nothing will be downloaded",
+                            detail: "This sample playlist only demonstrates the sync flow and never changes your music files.",
+                            systemImage: "checkmark.shield.fill",
+                            color: .blue
+                        )
                     }
                 }
                 .padding(24)
@@ -148,7 +192,7 @@ struct SyncPreviewSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(pending.playlist.executionKind == .sockseek ? "Start Sockseek" : "Run Demo Preview") {
+                Button(isLiveSync ? "Start Sync" : "Run Preview") {
                     model.confirmPendingSync()
                     dismiss()
                 }
@@ -160,7 +204,28 @@ struct SyncPreviewSheet: View {
             .padding(.vertical, 14)
             .background(.bar)
         }
-        .frame(width: 680, height: 500)
+        .frame(width: 660, height: 520)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var playlistSubtitle: String {
+        let trackDetail = pending.playlist.trackCount == 0
+            ? "Track list loads when the sync starts"
+            : "\(pending.playlist.trackCount) tracks"
+        return "\(trackDetail) · \(pending.trigger.rawValue) run"
+    }
+
+    private var fallbackExplanation: String {
+        switch effectivePending.youtubePolicy {
+        case .inherit:
+            return model.settings.allowYouTubeFallback
+                ? "Uses your saved setting: fallback is allowed. Fallback results may not meet the preferred audio target."
+                : "Uses your saved setting: fallback is disabled for this run."
+        case .allow:
+            return "Allowed for this run. Fallback results may improve coverage but may not meet the preferred audio target."
+        case .never:
+            return "Disabled for this run. SeekSync will use Soulseek results only."
+        }
     }
 
     private var startBlocker: String? {
@@ -172,5 +237,62 @@ struct SyncPreviewSheet: View {
             return "Sockseek 3 must be ready before a live run can start."
         }
         return nil
+    }
+}
+
+private struct SyncSummaryItem: View {
+    let label: String
+    let value: String
+    let systemImage: String
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: systemImage)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(value)
+                    .font(.callout.weight(.medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(value)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct SyncNotice: View {
+    let title: String
+    let detail: String
+    let systemImage: String
+    let color: Color
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 11) {
+            Image(systemName: systemImage)
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 22)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.callout.weight(.semibold))
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(color.opacity(0.09), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(color.opacity(0.18), lineWidth: 1)
+        }
     }
 }

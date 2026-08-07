@@ -3,6 +3,14 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.1] - 2026-08-06
+
+- Refine the playlist sync confirmation dialog with a clearer summary of the
+  destination, audio target, quality policy, and YouTube fallback behavior.
+- Keep the sanitized command available as optional detail while making live
+  downloads, demo previews, and start blockers visually distinct.
+- Add app-scoped render coverage for both live and preview-only sync states.
+
 ## [0.3.0] - 2026-08-06
 
 - Reorganize Settings around downloads, accounts, automation, and Sockseek
