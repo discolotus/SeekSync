@@ -18,14 +18,18 @@ struct LibraryInspectorVariant: View {
         if mode.usesOverlayInspector {
             navigation(inlineInspectorWidth: nil)
                 .overlay(alignment: .trailing) {
-                    if inspectorPresented {
+                    if inspectorPresented && model.selectedSection != .batchSync {
                         compactInspector(availableWidth: availableWidth)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
                 }
                 .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: inspectorPresented)
         } else {
-            navigation(inlineInspectorWidth: inspectorPresented ? (mode == .wide ? 380 : 340) : nil)
+            navigation(
+                inlineInspectorWidth: inspectorPresented && model.selectedSection != .batchSync
+                    ? (mode == .wide ? 380 : 340)
+                    : nil
+            )
                 .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: inspectorPresented)
         }
     }
@@ -99,6 +103,8 @@ struct LibraryInspectorVariant: View {
         switch model.selectedSection {
         case .playlists:
             PlaylistLibraryScreen(onAdd: { showAddPlaylist = true })
+        case .batchSync:
+            BatchSyncScreen()
         case .syncPool:
             SyncPoolScreen()
         case .activity:
@@ -123,6 +129,8 @@ struct LibraryInspectorVariant: View {
                     detail: "Its coverage, sync intent, and effective policy will appear here."
                 )
             }
+        case .batchSync:
+            PolicyExplainer()
         case .syncPool:
             if let nextPlan = model.plans.filter(\.enabled).min(by: { $0.nextRunAt < $1.nextRunAt }),
                let playlist = model.playlist(for: nextPlan) {

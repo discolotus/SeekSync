@@ -3,6 +3,14 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.3] - 2026-08-06
+
+- Add a searchable playlist grid for selecting and confirming one-time batch
+  sync queues that run sequentially.
+- Exercise the signed ARM64 release archive in pull-request CI by installing it
+  into an isolated Applications-style directory and launching its root window
+  on the macOS 15 publishing runner.
+
 ## [0.3.2] - 2026-08-06
 
 - Preserve the playlist position, song, artist, album, and reason for each

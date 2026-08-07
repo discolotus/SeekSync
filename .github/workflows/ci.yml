@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -14,6 +15,10 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
+      - name: Verify publishing runner
+        run: |
+          test "$(uname -m)" = arm64
+          test "$(sw_vers -productVersion | cut -d. -f1)" = 15
       - name: Test
         run: make test
       - name: Package release
@@ -36,3 +41,5 @@ jobs:
           mkdir -p "$RUNNER_TEMP/homebrew-tap/Casks"
           cp dist/release/seeksync.rb "$RUNNER_TEMP/homebrew-tap/Casks/seeksync.rb"
           brew style "$RUNNER_TEMP/homebrew-tap/Casks/seeksync.rb"
+      - name: Install and launch release bundle
+        run: make test-packaged-app

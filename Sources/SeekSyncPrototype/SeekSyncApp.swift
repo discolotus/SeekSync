@@ -52,6 +52,7 @@ struct RootPrototypeView: View {
                 }
                 .help(inspectorPresented ? "Hide playlist inspector" : "Show playlist inspector")
                 .accessibilityLabel(inspectorPresented ? "Hide playlist inspector" : "Show playlist inspector")
+                .disabled(model.selectedSection == .batchSync)
             }
         }
         .sheet(isPresented: $showAddPlaylist) {
@@ -60,6 +61,10 @@ struct RootPrototypeView: View {
         }
         .sheet(item: $model.pendingSync) { pending in
             SyncPreviewSheet(pending: pending)
+                .environmentObject(model)
+        }
+        .sheet(item: $model.pendingBatchSync) { pending in
+            BatchSyncPreviewSheet(pending: pending)
                 .environmentObject(model)
         }
         .onChange(of: model.selectedPlaylistID) { _, playlistID in
@@ -80,8 +85,20 @@ struct RootPrototypeView: View {
                     }
             }
         }
+        .task { await completeRuntimeSmokeIfRequested() }
     }
 
+    @MainActor
+    private func completeRuntimeSmokeIfRequested() async {
+        guard ProcessInfo.processInfo.environment["SEEKSYNC_RUNTIME_SMOKE"] == "1" else { return }
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        let hasVisibleWindow = NSApp.windows.contains { $0.isVisible && $0.contentView != nil }
+        let marker = hasVisibleWindow
+            ? "SeekSync runtime smoke: root view appeared\n"
+            : "SeekSync runtime smoke: no visible app window\n"
+        FileHandle.standardOutput.write(Data(marker.utf8))
+        NSApp.terminate(nil)
+    }
 }
 
 struct MenuBarStatusView: View {
