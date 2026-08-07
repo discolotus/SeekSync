@@ -29,12 +29,12 @@ final class SeekSyncLayoutModeTests: XCTestCase {
 final class SeekSyncVersionTests: XCTestCase {
     func testDisplaysPackagedAppVersion() {
         XCTAssertEqual(
-            SeekSyncVersion.label(infoDictionary: ["CFBundleShortVersionString": "0.3.4"]),
-            "SeekSync 0.3.4"
+            SeekSyncVersion.label(infoDictionary: ["CFBundleShortVersionString": "0.3.5"]),
+            "SeekSync 0.3.5"
         )
         XCTAssertEqual(
-            SeekSyncVersion.shortLabel(infoDictionary: ["CFBundleShortVersionString": "0.3.4"]),
-            "v0.3.4"
+            SeekSyncVersion.shortLabel(infoDictionary: ["CFBundleShortVersionString": "0.3.5"]),
+            "v0.3.5"
         )
     }
 
@@ -91,6 +91,8 @@ final class SeekSyncVisualRenderTests: XCTestCase {
         var livePlaylist = Playlist.samples[0]
         livePlaylist.isFixture = false
         liveModel.dependencyState = .ready(version: "3.0.5")
+        liveModel.settings.libraryReuseEnabled = true
+        liveModel.settings.libraryDirectory = FileManager.default.temporaryDirectory.path
         liveModel.showSyncPreview(for: livePlaylist)
         let livePendingSync = try XCTUnwrap(liveModel.pendingSync)
         let liveSyncPreview = SyncPreviewSheet(pending: livePendingSync)
@@ -115,8 +117,8 @@ final class SeekSyncVisualRenderTests: XCTestCase {
         let batchSyncPNG = try renderPNG(AnyView(batchSync), size: NSSize(width: 980, height: 720))
         let batchSyncPreviewPNG = try renderPNG(AnyView(batchSyncPreview), size: NSSize(width: 680, height: 620))
         let settingsPNG = try renderPNG(AnyView(settings), size: NSSize(width: 660, height: 560))
-        let syncPreviewPNG = try renderPNG(AnyView(syncPreview), size: NSSize(width: 660, height: 520))
-        let liveSyncPreviewPNG = try renderPNG(AnyView(liveSyncPreview), size: NSSize(width: 660, height: 520))
+        let syncPreviewPNG = try renderPNG(AnyView(syncPreview), size: NSSize(width: 680, height: 660))
+        let liveSyncPreviewPNG = try renderPNG(AnyView(liveSyncPreview), size: NSSize(width: 680, height: 660))
         let sourceIconURL = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -223,14 +225,103 @@ final class SeekSyncVisualRenderTests: XCTestCase {
             try batchSyncPNG.write(to: outputDirectory.appendingPathComponent("implementation-batch-sync-980x720@2x.png"), options: .atomic)
             try batchSyncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-batch-sync-preview-680x620@2x.png"), options: .atomic)
             try settingsPNG.write(to: outputDirectory.appendingPathComponent("implementation-settings-660x560@2x.png"), options: .atomic)
-            try syncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-sync-preview-660x520@2x.png"), options: .atomic)
-            try liveSyncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-live-sync-preview-660x520@2x.png"), options: .atomic)
+            try syncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-sync-preview-680x660@2x.png"), options: .atomic)
+            try liveSyncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-live-sync-preview-680x660@2x.png"), options: .atomic)
             try queuePNG.write(to: outputDirectory.appendingPathComponent("implementation-sync-queue-620x250@2x.png"), options: .atomic)
             try brandHeaderPNG.write(to: outputDirectory.appendingPathComponent("implementation-brand-header-320x80@2x.png"), options: .atomic)
             try identityComparisonPNG.write(to: outputDirectory.appendingPathComponent("comparison-app-icon-vs-brand-header-640x160@2x.png"), options: .atomic)
             try failureDetailsPNG.write(to: outputDirectory.appendingPathComponent("implementation-track-failure-details-680x330@2x.png"), options: .atomic)
         }
         queueModel.cancelActiveRun()
+    }
+
+    func testLibraryReuseSummaryAndTrackQualityListRender() throws {
+        let analysis = PlaylistLibraryAnalysis(
+            playlistID: "visual-library-reuse",
+            playlistName: "Road Trip Archive",
+            analyzedAt: Date(timeIntervalSince1970: 1_750_000_000),
+            sourceLibraryPath: "/Users/listener/Music/Archive",
+            preferredFormat: "mp3",
+            minimumBitrateKbps: 256,
+            tracks: [
+                PlaylistTrackRecord(
+                    seed: PlaylistTrackSeed(
+                        position: 1,
+                        artist: "The Existing Copies",
+                        title: "Needs a Better Encode",
+                        album: "Old Library",
+                        lengthSeconds: 247
+                    ),
+                    disposition: .libraryBelowThreshold,
+                    localPath: "/Users/listener/Music/Archive/The Existing Copies/Needs a Better Encode.mp3",
+                    quality: AudioFileQuality(
+                        format: "mp3",
+                        bitrateKbps: 128,
+                        sampleRateHz: 44_100,
+                        bitDepth: nil,
+                        durationSeconds: 247
+                    )
+                ),
+                PlaylistTrackRecord(
+                    seed: PlaylistTrackSeed(
+                        position: 2,
+                        artist: "Local Favorite",
+                        title: "Already Excellent",
+                        album: "Reference Masters",
+                        lengthSeconds: 312
+                    ),
+                    disposition: .libraryReference,
+                    localPath: "/Users/listener/Music/Archive/Local Favorite/Already Excellent.mp3",
+                    quality: AudioFileQuality(
+                        format: "mp3",
+                        bitrateKbps: 320,
+                        sampleRateHz: 48_000,
+                        bitDepth: nil,
+                        durationSeconds: 312
+                    )
+                ),
+                PlaylistTrackRecord(
+                    seed: PlaylistTrackSeed(
+                        position: 3,
+                        artist: "Missing Artist",
+                        title: "Find This One",
+                        album: "Next Download",
+                        lengthSeconds: 198
+                    ),
+                    disposition: .downloadRequired,
+                    localPath: nil,
+                    quality: nil
+                )
+            ]
+        )
+
+        let summary = LibraryReuseAnalysisSummaryCard(analysis: analysis, onShowTracks: {})
+            .padding(20)
+            .frame(width: 680, height: 270, alignment: .topLeading)
+            .background(Color(nsColor: .windowBackgroundColor))
+
+        let trackList = PlaylistTrackListSheet(analysis: analysis)
+            .frame(width: 860, height: 720)
+            .background(Color(nsColor: .windowBackgroundColor))
+
+        let summaryPNG = try renderPNG(AnyView(summary), size: NSSize(width: 680, height: 270))
+        let trackListPNG = try renderPNG(AnyView(trackList), size: NSSize(width: 860, height: 720))
+
+        XCTAssertGreaterThan(summaryPNG.count, 10_000)
+        XCTAssertGreaterThan(trackListPNG.count, 20_000)
+
+        if let outputPath = ProcessInfo.processInfo.environment["SEEKSYNC_VISUAL_QA_DIR"], !outputPath.isEmpty {
+            let outputDirectory = URL(fileURLWithPath: outputPath, isDirectory: true)
+            try FileManager.default.createDirectory(at: outputDirectory, withIntermediateDirectories: true)
+            try summaryPNG.write(
+                to: outputDirectory.appendingPathComponent("implementation-library-reuse-summary-680x270@2x.png"),
+                options: .atomic
+            )
+            try trackListPNG.write(
+                to: outputDirectory.appendingPathComponent("implementation-library-reuse-track-quality-860x720@2x.png"),
+                options: .atomic
+            )
+        }
     }
 
     private func renderPNG(_ view: AnyView, size: NSSize) throws -> Data {
@@ -615,6 +706,19 @@ final class ClientSettingsCodingTests: XCTestCase {
 
         XCTAssertEqual(decoded.preferredMinBitrateValue, .kbps200)
     }
+
+    func testDecodesSavedSettingsFromBeforeLibraryReuseWasAdded() throws {
+        let encoded = try JSONEncoder().encode(ClientSettings())
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "libraryReuseEnabled")
+        object.removeValue(forKey: "libraryDirectory")
+        let legacyData = try JSONSerialization.data(withJSONObject: object)
+
+        let decoded = try JSONDecoder().decode(ClientSettings.self, from: legacyData)
+
+        XCTAssertFalse(decoded.isLibraryReuseEnabled)
+        XCTAssertEqual(decoded.libraryDirectoryPath, "")
+    }
 }
 
 final class SockseekCommandBuilderTests: XCTestCase {
@@ -655,6 +759,33 @@ final class SockseekCommandBuilderTests: XCTestCase {
         XCTAssertEqual(command.arguments[index + 1], "false")
     }
 
+    func testLibraryReuseAddsTagMatcherAndForcesQualityAndPlaylistOutput() {
+        var settings = ClientSettings()
+        settings.binaryPath = "/tmp/sockseek"
+        settings.configPath = "/tmp/sockseek.conf"
+        settings.libraryReuseEnabled = true
+        settings.libraryDirectory = "/Volumes/Music Library"
+        settings.lookForPreferredQuality = false
+        settings.writeM3UPlaylist = false
+        settings.preferredMinBitrateRaw = "320"
+        let conditions = LibraryReuseConditionPolicy(arguments: ["--pref-max-bitrate", "384"])
+
+        let command = SockseekCommandBuilder().command(
+            for: Playlist.samples[0],
+            settings: settings,
+            libraryReuseConditionPolicy: conditions
+        )
+
+        XCTAssertEqual(value(after: "--skip-music-dir", in: command), "/Volumes/Music Library")
+        XCTAssertEqual(value(after: "--skip-mode-music-dir", in: command), "tag")
+        XCTAssertEqual(value(after: "--skip-mode-output-dir", in: command), "index")
+        XCTAssertEqual(value(after: "--skip-existing", in: command), "true")
+        XCTAssertEqual(value(after: "--skip-check-pref-cond", in: command), "true")
+        XCTAssertEqual(value(after: "--write-playlist", in: command), "true")
+        XCTAssertEqual(value(after: "--pref-min-bitrate", in: command), "320")
+        XCTAssertEqual(value(after: "--pref-max-bitrate", in: command), "384")
+    }
+
     func testAbsoluteOutputDirectoryKeepsLeadingSlash() {
         let path = SockseekCommandBuilder().indexPath(for: Playlist.samples[0], outputDirectory: "/Volumes/External4TB/Music")
         XCTAssertEqual(path, "/Volumes/External4TB/Music/.seeksync-index-midnight-drive.csv")
@@ -675,16 +806,335 @@ final class SockseekCommandBuilderTests: XCTestCase {
         let numberIndex = try! XCTUnwrap(command.arguments.firstIndex(of: "--number"))
         XCTAssertEqual(command.arguments[numberIndex + 1], "1")
     }
+
+    private func value(after flag: String, in command: SLDLCommand) -> String? {
+        guard let index = command.arguments.firstIndex(of: flag),
+              command.arguments.indices.contains(index + 1) else { return nil }
+        return command.arguments[index + 1]
+    }
+}
+
+final class LibraryReuseTests: XCTestCase {
+    func testParsesJobsFullOutputInPlaylistOrder() {
+        let output = """
+        [001] ExtractJob: Spotify: Input: playlist
+        2 jobs:
+          Song:
+            Artist:             First Artist
+            Title:              First Track
+            Album:              First Album
+            Length:             241s
+            URL/ID:             spotify:track:first
+
+          Song:
+            Artist:             Second Artist
+            Title:              Second Track
+            Length:             199s
+        """
+
+        let tracks = SockseekJobsFullParser().parse(output)
+
+        XCTAssertEqual(tracks.count, 2)
+        XCTAssertEqual(tracks[0].position, 1)
+        XCTAssertEqual(tracks[0].artist, "First Artist")
+        XCTAssertEqual(tracks[0].album, "First Album")
+        XCTAssertEqual(tracks[0].lengthSeconds, 241)
+        XCTAssertEqual(tracks[1].position, 2)
+        XCTAssertNil(tracks[1].album)
+    }
+
+    func testParsesQuotedAndRelativeSockseekIndexRows() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SeekSyncIndexParser-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let index = directory.appendingPathComponent("index.csv")
+        try """
+        filepath,artist,album,title,length,tracktype,state,failurereason
+        "./Artist/Track, Mix.mp3","Artist, Guest",Album,"Track, Mix",240,0,3,0
+        ,Missing Artist,,Missing Track,-1,0,2,9
+
+        """.write(to: index, atomically: true, encoding: .utf8)
+
+        let entries = try SockseekIndexParser().parse(url: index)
+
+        XCTAssertEqual(entries.count, 2)
+        XCTAssertEqual(entries[0].artist, "Artist, Guest")
+        XCTAssertEqual(entries[0].title, "Track, Mix")
+        XCTAssertEqual(
+            entries[0].path,
+            directory.appendingPathComponent("Artist/Track, Mix.mp3").standardizedFileURL.path
+        )
+        XCTAssertTrue(entries[0].isExisting)
+        XCTAssertNil(entries[1].path)
+        XCTAssertEqual(entries[1].state, 2)
+    }
+
+    func testCompletedRunInventoryUsesStableIndexAndKeepsAnUnreplacedBelowTargetFileVisible() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SeekSyncCompletedInventory-\(UUID().uuidString)")
+        let library = root.appendingPathComponent("library")
+        let output = root.appendingPathComponent("downloads")
+        try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let referenced = library.appendingPathComponent("reference.mp3")
+        let belowTarget = output.appendingPathComponent("below.mp3")
+        let downloaded = output.appendingPathComponent("downloaded.mp3")
+        try Data([0]).write(to: referenced)
+        try Data([0]).write(to: belowTarget)
+        try Data([0]).write(to: downloaded)
+
+        let seeds = [
+            PlaylistTrackSeed(position: 1, artist: "Local Artist", title: "Reference", album: "Album", lengthSeconds: 180),
+            PlaylistTrackSeed(position: 2, artist: "New Artist", title: "Downloaded", album: "Album", lengthSeconds: 181),
+            PlaylistTrackSeed(position: 3, artist: "Old Artist", title: "Upgrade Failed", album: "Album", lengthSeconds: 182)
+        ]
+        let playlist = Playlist.samples[0]
+        let previous = PlaylistLibraryAnalysis(
+            playlistID: playlist.id,
+            playlistName: playlist.name,
+            analyzedAt: Date(timeIntervalSince1970: 1),
+            sourceLibraryPath: library.path,
+            preferredFormat: "mp3",
+            minimumBitrateKbps: 256,
+            tracks: [
+                PlaylistTrackRecord(seed: seeds[0], disposition: .libraryReference, localPath: referenced.path, quality: nil),
+                PlaylistTrackRecord(seed: seeds[1], disposition: .downloadRequired, localPath: nil, quality: nil),
+                PlaylistTrackRecord(
+                    seed: seeds[2],
+                    disposition: .libraryBelowThreshold,
+                    localPath: belowTarget.path,
+                    quality: AudioFileQuality(format: "mp3", bitrateKbps: 128, sampleRateHz: 44_100, bitDepth: nil, durationSeconds: 182)
+                )
+            ]
+        )
+        let index = output.appendingPathComponent("playlist-index.csv")
+        try """
+        filepath,artist,album,title,length,tracktype,state,failurereason
+        \(referenced.path),Local Artist,Album,Reference,180,0,3,0
+        \(downloaded.path),New Artist,Album,Downloaded,181,0,1,0
+        ,Old Artist,Album,Upgrade Failed,182,0,2,9
+
+        """.write(to: index, atomically: true, encoding: .utf8)
+        let command = SLDLCommand(
+            executable: "/tmp/sockseek",
+            arguments: [
+                playlist.spotifyURL,
+                "--output-dir", output.path,
+                "--index-path", index.path,
+                "--skip-music-dir", library.path,
+                "--pref-format", "mp3",
+                "--pref-min-bitrate", "256"
+            ]
+        )
+
+        let result = try await LibraryReuseAnalyzer().completedAnalysis(
+            playlist: playlist,
+            seeds: seeds,
+            previousAnalysis: previous,
+            command: command
+        )
+        let analysis = try XCTUnwrap(result)
+
+        XCTAssertEqual(analysis.tracks.map(\.disposition), [
+            .libraryReference,
+            .downloaded,
+            .libraryBelowThreshold
+        ])
+        XCTAssertEqual(analysis.tracks[0].localPath, referenced.path)
+        XCTAssertEqual(analysis.tracks[1].localPath, downloaded.path)
+        XCTAssertEqual(analysis.tracks[2].localPath, belowTarget.path)
+        XCTAssertEqual(analysis.tracks[2].quality?.bitrateKbps, 128)
+        XCTAssertEqual(analysis.targetLabel, "MP3 · at least 256 kbps")
+    }
+
+    func testInstalledSockseekPreviewSeparatesReferenceBelowTargetAndDownload() async throws {
+        let binary = ConfigStore.detectedBinaryPath()
+        guard FileManager.default.isExecutableFile(atPath: binary) else {
+            throw XCTSkip("Sockseek is not installed on this machine.")
+        }
+        let ffmpegCandidates = ["/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg"]
+        guard let ffmpeg = ffmpegCandidates.first(where: FileManager.default.isExecutableFile(atPath:)) else {
+            throw XCTSkip("ffmpeg is unavailable for generating tagged audio fixtures.")
+        }
+
+        let repository = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SeekSyncLibraryReuse-\(UUID().uuidString)")
+        let library = root.appendingPathComponent("library")
+        let output = root.appendingPathComponent("downloads")
+        try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let runner = SockseekProcessRunner()
+        try await makeTaggedMP3(
+            executable: ffmpeg,
+            output: library.appendingPathComponent("qualifying.mp3"),
+            artist: "Preview Artist",
+            title: "Qualifying Track",
+            bitrate: "320k",
+            runner: runner
+        )
+        try await makeTaggedMP3(
+            executable: ffmpeg,
+            output: library.appendingPathComponent("below.mp3"),
+            artist: "Preview Artist",
+            title: "Below Track",
+            bitrate: "128k",
+            runner: runner
+        )
+        try await makeTaggedMP3(
+            executable: ffmpeg,
+            output: output.appendingPathComponent("already-downloaded.mp3"),
+            artist: "Preview Artist",
+            title: "Already Downloaded",
+            bitrate: "320k",
+            runner: runner
+        )
+
+        let playlistCSV = root.appendingPathComponent("playlist.csv")
+        try """
+        Artist,Album,Title,Length
+        Preview Artist,Preview Album,Qualifying Track,0
+        Preview Artist,Preview Album,Below Track,0
+        Preview Artist,Preview Album,Missing Track,0
+        Preview Artist,Preview Album,Already Downloaded,0
+        """.write(to: playlistCSV, atomically: true, encoding: .utf8)
+
+        var settings = ClientSettings()
+        settings.binaryPath = binary
+        settings.configPath = repository.appendingPathComponent("Fixtures/sockseek.qa.conf").path
+        settings.profileName = ""
+        settings.libraryReuseEnabled = true
+        settings.libraryDirectory = library.path
+        settings.outputDirectory = output.path
+        settings.preferredFormat = .mp3
+        settings.preferredFormatRaw = "mp3"
+        settings.preferredMinBitrate = .kbps256
+        settings.preferredMinBitrateRaw = "256"
+        let playlist = Playlist(
+            id: "library-reuse-test",
+            name: "Library reuse test",
+            owner: "Tests",
+            detail: "",
+            spotifyURL: playlistCSV.path,
+            artworkURL: nil,
+            artworkHue: 0,
+            trackCount: 4,
+            localCount: 0,
+            upgradeCandidates: 0,
+            needsReview: 0,
+            lastSyncedAt: nil,
+            health: .neverSynced,
+            isFixture: false
+        )
+        let stableIndex = URL(
+            fileURLWithPath: SockseekCommandBuilder().indexPath(
+                for: playlist,
+                outputDirectory: output.path
+            )
+        )
+        try """
+        filepath,artist,album,title,length,tracktype,state,failurereason
+        ./already-downloaded.mp3,Preview Artist,Preview Album,Already Downloaded,0,0,1,0
+
+        """.write(to: stableIndex, atomically: true, encoding: .utf8)
+
+        let analysis = try await LibraryReuseAnalyzer().analyze(playlist: playlist, settings: settings)
+
+        XCTAssertEqual(analysis.tracks.map(\.disposition), [
+            .libraryReference,
+            .libraryBelowThreshold,
+            .downloadRequired,
+            .downloaded
+        ])
+        XCTAssertEqual(analysis.referenceCount, 1)
+        XCTAssertEqual(analysis.belowThresholdCount, 1)
+        XCTAssertEqual(analysis.downloadRequiredCount, 1)
+        XCTAssertEqual(analysis.downloadedCount, 1)
+        XCTAssertEqual(analysis.tracks[0].quality?.format, "mp3")
+        XCTAssertNotNil(analysis.tracks[0].localPath)
+        XCTAssertNotNil(analysis.tracks[1].localPath)
+        XCTAssertNil(analysis.tracks[2].localPath)
+        XCTAssertEqual(analysis.tracks[3].localPath, output.appendingPathComponent("already-downloaded.mp3").path)
+
+        let advancedConditions = LibraryReuseConditionPolicy(
+            arguments: ["--pref-max-bitrate", "200"]
+        )
+        let stricterAnalysis = try await LibraryReuseAnalyzer().analyze(
+            playlist: playlist,
+            settings: settings,
+            conditionPolicy: advancedConditions
+        )
+        XCTAssertEqual(stricterAnalysis.tracks.map(\.disposition), [
+            .libraryBelowThreshold,
+            .libraryBelowThreshold,
+            .downloadRequired,
+            .libraryBelowThreshold
+        ])
+        XCTAssertEqual(stricterAnalysis.conditionFingerprint, advancedConditions.fingerprint)
+
+        do {
+            _ = try await LibraryReuseAnalyzer().analyze(
+                playlist: playlist,
+                settings: settings,
+                conditionPolicy: LibraryReuseConditionPolicy(
+                    arguments: ["--seeksync-invalid-preview-option", "true"]
+                )
+            )
+            XCTFail("A failed preview pass must not accept the preseeded stable index.")
+        } catch LibraryReuseAnalysisError.previewPassIncomplete(let pass, let status, _) {
+            XCTAssertEqual(pass, "quality-gated")
+            XCTAssertNotEqual(status, 0)
+        } catch {
+            XCTFail("Unexpected preview validation error: \(error)")
+        }
+    }
+
+    private func makeTaggedMP3(
+        executable: String,
+        output: URL,
+        artist: String,
+        title: String,
+        bitrate: String,
+        runner: SockseekProcessRunner
+    ) async throws {
+        let result = try await runner.run(
+            SLDLCommand(
+                executable: executable,
+                arguments: [
+                    "-hide_banner", "-loglevel", "error", "-y",
+                    "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                    "-t", "0.4", "-b:a", bitrate,
+                    "-metadata", "artist=\(artist)",
+                    "-metadata", "title=\(title)",
+                    "-metadata", "album=Preview Album",
+                    output.path
+                ]
+            )
+        )
+        XCTAssertEqual(result.exitCode, 0, result.output)
+    }
 }
 
 final class SockseekProgressParserTests: XCTestCase {
     func testReportsCurrentTrackAndByteLevelDownloadProgress() {
         var tracker = SockseekProgressTracker()
 
-        tracker.consume(#"{"type":"track_list","data":{"total":2,"tracks":[{"index":0,"artist":"Artist One","title":"First Song","lifecycleState":"Pending","terminalOutcome":"None","skipReason":"None"},{"index":1,"artist":"Artist Two","title":"Second Song","lifecycleState":"Pending","terminalOutcome":"None","skipReason":"None"}]}}"#)
+        tracker.consume(#"{"type":"track_list","data":{"total":2,"tracks":[{"index":0,"artist":"Artist One","title":"First Song","album":"First Album","length":213,"lifecycleState":"Pending","terminalOutcome":"None","skipReason":"None"},{"index":1,"artist":"Artist Two","title":"Second Song","lifecycleState":"Pending","terminalOutcome":"None","skipReason":"None"}]}}"#)
         tracker.consume(#"{"type":"search_start","data":{"artist":"Artist One","title":"First Song"}}"#)
 
         XCTAssertEqual(tracker.snapshot.totalTracks, 2)
+        XCTAssertEqual(tracker.playlistTracks.count, 2)
+        XCTAssertEqual(tracker.playlistTracks[0].position, 1)
+        XCTAssertEqual(tracker.playlistTracks[0].album, "First Album")
+        XCTAssertEqual(tracker.playlistTracks[0].lengthSeconds, 213)
         XCTAssertEqual(tracker.snapshot.completedTracks, 0)
         XCTAssertEqual(tracker.snapshot.currentTrack?.position, 1)
         XCTAssertEqual(tracker.snapshot.currentTrack?.artist, "Artist One")
@@ -896,6 +1346,53 @@ final class SyncQueueTests: XCTestCase {
         XCTAssertEqual(model.toastMessage, "Removed \(second.name) from the sync queue.")
 
         model.cancelActiveRun()
+    }
+
+    func testQueuedSyncFreezesReuseConditionsFromItsConfirmedConfig() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("SeekSyncQueuedConditions-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let config = root.appendingPathComponent("sockseek.conf")
+        try """
+        output-dir = /private/tmp/seeksync-queued-conditions
+        pref-format = mp3
+        pref-max-bitrate = 200
+
+        """.write(to: config, atomically: true, encoding: .utf8)
+
+        let model = AppModel()
+        model.setConfigPath(config.path)
+        model.settings.libraryReuseEnabled = true
+        model.settings.libraryDirectory = root.path
+        let first = Playlist.samples[0]
+        let second = Playlist.samples[1]
+        model.showSyncPreview(for: first)
+        model.confirmPendingSync()
+        model.showSyncPreview(for: second)
+        model.confirmPendingSync()
+
+        let queued = try XCTUnwrap(model.queuedSyncs.first)
+        XCTAssertEqual(value(after: "--pref-max-bitrate", in: queued.command), "200")
+        XCTAssertEqual(queued.libraryReuseConditionPolicy.arguments, ["--pref-max-bitrate", "200"])
+
+        try """
+        output-dir = /private/tmp/seeksync-queued-conditions
+        pref-format = mp3
+        pref-max-bitrate = 192
+
+        """.write(to: config, atomically: true, encoding: .utf8)
+        model.reloadConfig()
+
+        XCTAssertEqual(value(after: "--pref-max-bitrate", in: model.queuedSyncs[0].command), "200")
+        XCTAssertEqual(value(after: "--pref-max-bitrate", in: model.command(for: second)), "192")
+        model.cancelActiveRun()
+    }
+
+    private func value(after flag: String, in command: SLDLCommand) -> String? {
+        guard let index = command.arguments.firstIndex(of: flag),
+              command.arguments.indices.contains(index + 1) else { return nil }
+        return command.arguments[index + 1]
     }
 }
 

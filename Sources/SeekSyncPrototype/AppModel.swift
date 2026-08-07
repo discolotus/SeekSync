@@ -21,6 +21,7 @@ struct SyncQueueItem: Identifiable, Equatable {
     let youtubePolicy: YouTubePolicy
     let command: SLDLCommand
     let youtubeFallbackEnabled: Bool
+    let libraryReuseConditionPolicy: LibraryReuseConditionPolicy
     let queuedAt = Date()
 }
 
@@ -40,6 +41,9 @@ final class AppModel: ObservableObject {
     @Published var pendingSync: PendingSync?
     @Published var pendingBatchSync: PendingBatchSync?
     @Published private(set) var syncQueue: [SyncQueueItem] = []
+    @Published private(set) var libraryAnalyses: [String: PlaylistLibraryAnalysis]
+    @Published private(set) var libraryAnalysisPlaylistIDs: Set<String> = []
+    @Published private(set) var libraryAnalysisMessages: [String: String] = [:]
     @Published var toastMessage: String?
     @Published var configMessage = "Loaded without changing the file."
     @Published var isConfigDirty = false
@@ -57,6 +61,7 @@ final class AppModel: ObservableObject {
     private var schedulerCancellable: AnyCancellable?
     private var activeRunTask: Task<Void, Never>?
     private var liveRunProgress: [UUID: SockseekProgressTracker] = [:]
+    private var libraryAnalysisTasks: [String: Task<Void, Never>] = [:]
 
     init() {
         let restored = try? persistence.load()
@@ -73,6 +78,7 @@ final class AppModel: ObservableObject {
             return interrupted
         }
         self.settings = restored?.settings ?? ClientSettings()
+        self.libraryAnalyses = restored?.libraryAnalyses ?? [:]
         if !self.liveSpotifyPlaylists.isEmpty {
             self.spotifyState = .cached(count: self.liveSpotifyPlaylists.count)
         }
@@ -101,6 +107,8 @@ final class AppModel: ObservableObject {
             settings.dailyHour = prototypeOnly.dailyHour
             settings.dailyMinute = prototypeOnly.dailyMinute
             settings.liveSchedulingArmed = prototypeOnly.liveSchedulingArmed
+            settings.libraryReuseEnabled = prototypeOnly.libraryReuseEnabled
+            settings.libraryDirectory = prototypeOnly.libraryDirectory
             configDocument = loaded.document
             configRevision = loaded.revision
             loadedConfigURL = detectedConfig.standardizedFileURL
@@ -126,7 +134,10 @@ final class AppModel: ObservableObject {
             .sink { [weak self] date in self?.tickScheduler(now: date) }
     }
 
-    deinit { activeRunTask?.cancel() }
+    deinit {
+        activeRunTask?.cancel()
+        libraryAnalysisTasks.values.forEach { $0.cancel() }
+    }
 
     var allPlaylists: [Playlist] {
         let base = spotifyCatalogLoaded ? liveSpotifyPlaylists : Playlist.samples
@@ -162,6 +173,38 @@ final class AppModel: ObservableObject {
 
     func latestRun(for playlistID: String) -> SyncRun? {
         runs.first { $0.playlistID == playlistID }
+    }
+
+    func libraryAnalysis(for playlistID: String) -> PlaylistLibraryAnalysis? {
+        libraryAnalyses[playlistID]
+    }
+
+    func isLibraryAnalysisCurrent(_ analysis: PlaylistLibraryAnalysis, for playlist: Playlist) -> Bool {
+        analysis.isCurrent(
+            for: settings,
+            playlist: playlist,
+            conditionFingerprint: libraryReuseConditionPolicy.fingerprint
+        )
+    }
+
+    func isAnalyzingLibrary(for playlistID: String) -> Bool {
+        libraryAnalysisPlaylistIDs.contains(playlistID)
+    }
+
+    var libraryReuseBlocker: String? {
+        guard settings.isLibraryReuseEnabled else { return nil }
+        guard !settings.libraryDirectoryPath.isEmpty else {
+            return "Choose an existing music library folder in Settings before using library references."
+        }
+        let path = NSString(string: settings.libraryDirectoryPath).expandingTildeInPath
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return "The existing music library folder is unavailable. Reconnect its drive or choose another folder in Settings."
+        }
+        guard FileManager.default.isReadableFile(atPath: path) else {
+            return "SeekSync cannot read the existing music library folder."
+        }
+        return nil
     }
 
     func isInPool(_ playlistID: String) -> Bool { plan(for: playlistID) != nil }
@@ -289,6 +332,10 @@ final class AppModel: ObservableObject {
             toastMessage = "Save or reload the edited settings before starting live syncs."
             return
         }
+        if hasLiveSync, let libraryReuseBlocker {
+            toastMessage = libraryReuseBlocker
+            return
+        }
 
         let queuedPlaylistIDs = Set(syncQueue.map(\.playlist.id))
         let candidates = pending.playlists.filter {
@@ -306,19 +353,30 @@ final class AppModel: ObservableObject {
     }
 
     func command(for pending: PendingSync) -> SLDLCommand {
-        commandBuilder.command(for: pending.playlist, settings: settings, youtubePolicy: pending.youtubePolicy)
+        commandBuilder.command(
+            for: pending.playlist,
+            settings: settings,
+            youtubePolicy: pending.youtubePolicy,
+            libraryReuseConditionPolicy: libraryReuseConditionPolicy
+        )
     }
 
     func command(for playlist: Playlist) -> SLDLCommand {
         commandBuilder.command(
             for: playlist,
             settings: settings,
-            youtubePolicy: plan(for: playlist.id)?.youtubePolicy ?? .inherit
+            youtubePolicy: plan(for: playlist.id)?.youtubePolicy ?? .inherit,
+            libraryReuseConditionPolicy: libraryReuseConditionPolicy
         )
     }
 
     func command(for playlist: Playlist, youtubePolicy: YouTubePolicy) -> SLDLCommand {
-        commandBuilder.command(for: playlist, settings: settings, youtubePolicy: youtubePolicy)
+        commandBuilder.command(
+            for: playlist,
+            settings: settings,
+            youtubePolicy: youtubePolicy,
+            libraryReuseConditionPolicy: libraryReuseConditionPolicy
+        )
     }
 
     func refreshSpotify() {
@@ -371,6 +429,8 @@ final class AppModel: ObservableObject {
             settings.dailyHour = prototypeOnly.dailyHour
             settings.dailyMinute = prototypeOnly.dailyMinute
             settings.liveSchedulingArmed = prototypeOnly.liveSchedulingArmed
+            settings.libraryReuseEnabled = prototypeOnly.libraryReuseEnabled
+            settings.libraryDirectory = prototypeOnly.libraryDirectory
             configDocument = loaded.document
             configRevision = loaded.revision
             loadedConfigURL = URL(fileURLWithPath: path).standardizedFileURL
@@ -447,6 +507,7 @@ final class AppModel: ObservableObject {
         spotifyCatalogLoaded = false
         plans = Self.samplePlans
         runs = Self.sampleRuns
+        libraryAnalyses = [:]
         settings.liveSchedulingArmed = false
         selectedPlaylistID = allPlaylists.first?.id
         spotifyState = .demo
@@ -579,6 +640,87 @@ final class AppModel: ObservableObject {
         }
     }
 
+    func setLibraryReuseEnabled(_ enabled: Bool) {
+        settings.libraryReuseEnabled = enabled
+        if persist() {
+            toastMessage = enabled
+                ? "Existing-library references enabled."
+                : "Existing-library references disabled."
+        }
+    }
+
+    func setLibraryDirectory(_ path: String) {
+        settings.libraryDirectory = path
+        settings.libraryReuseEnabled = true
+        if persist() {
+            toastMessage = "Existing music library updated. Preview a playlist to check its matches."
+        }
+    }
+
+    func analyzeLibraryReuse(for requestedPlaylist: Playlist) {
+        let playlist = allPlaylists.first(where: { $0.id == requestedPlaylist.id }) ?? requestedPlaylist
+        guard settings.isLibraryReuseEnabled else {
+            toastMessage = "Enable existing-library references in Settings before running a preview."
+            return
+        }
+        guard playlist.executionKind == .sockseek else {
+            toastMessage = "Library reuse previews are available for real Spotify playlists."
+            return
+        }
+        guard dependencyState.isReady else {
+            toastMessage = "Sockseek 3 must be ready before analyzing a playlist."
+            return
+        }
+        if let libraryReuseBlocker {
+            toastMessage = libraryReuseBlocker
+            return
+        }
+        guard libraryAnalysisTasks[playlist.id] == nil else { return }
+
+        let settingsSnapshot = settings
+        let conditionPolicySnapshot = libraryReuseConditionPolicy
+        libraryAnalysisPlaylistIDs.insert(playlist.id)
+        libraryAnalysisMessages[playlist.id] = "Preparing a read-only library preview…"
+        let analyzer = LibraryReuseAnalyzer()
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let analysis = try await analyzer.analyze(
+                    playlist: playlist,
+                    settings: settingsSnapshot,
+                    conditionPolicy: conditionPolicySnapshot
+                ) { [weak self] stage in
+                    await MainActor.run {
+                        self?.libraryAnalysisMessages[playlist.id] = stage
+                    }
+                }
+                try Task.checkCancellation()
+                let currentPlaylist = self.allPlaylists.first(where: { $0.id == playlist.id }) ?? playlist
+                guard self.isLibraryAnalysisCurrent(analysis, for: currentPlaylist) else {
+                    self.libraryAnalysisMessages[playlist.id] = "The playlist or reuse settings changed while the preview was running. Analyze again for a current inventory."
+                    self.libraryAnalysisPlaylistIDs.remove(playlist.id)
+                    self.libraryAnalysisTasks.removeValue(forKey: playlist.id)
+                    return
+                }
+                self.libraryAnalyses[playlist.id] = analysis
+                self.applyLibraryAnalysisSummary(analysis)
+                self.libraryAnalysisMessages[playlist.id] = "Analysis complete."
+                self.libraryAnalysisPlaylistIDs.remove(playlist.id)
+                self.libraryAnalysisTasks.removeValue(forKey: playlist.id)
+                self.persist()
+            } catch is CancellationError {
+                self.libraryAnalysisMessages[playlist.id] = "Library preview cancelled."
+                self.libraryAnalysisPlaylistIDs.remove(playlist.id)
+                self.libraryAnalysisTasks.removeValue(forKey: playlist.id)
+            } catch {
+                self.libraryAnalysisMessages[playlist.id] = error.localizedDescription
+                self.libraryAnalysisPlaylistIDs.remove(playlist.id)
+                self.libraryAnalysisTasks.removeValue(forKey: playlist.id)
+            }
+        }
+        libraryAnalysisTasks[playlist.id] = task
+    }
+
     func cancelActiveRun() {
         guard let active = activeRun else { return }
         updateRun(active.id) { $0.message = "Cancelling…" }
@@ -601,13 +743,24 @@ final class AppModel: ObservableObject {
             toastMessage = "Save or reload the edited settings before starting a live run."
             return
         }
-        let command = commandBuilder.command(for: playlist, settings: settings, youtubePolicy: youtubePolicy)
+        if playlist.executionKind == .sockseek, let libraryReuseBlocker {
+            toastMessage = libraryReuseBlocker
+            return
+        }
+        let conditionPolicy = libraryReuseConditionPolicy
+        let command = commandBuilder.command(
+            for: playlist,
+            settings: settings,
+            youtubePolicy: youtubePolicy,
+            libraryReuseConditionPolicy: conditionPolicy
+        )
         let youtubeFallbackEnabled = youtubePolicy.allowsFallback(using: settings)
         launchSync(
             playlist: playlist,
             trigger: trigger,
             command: command,
-            youtubeFallbackEnabled: youtubeFallbackEnabled
+            youtubeFallbackEnabled: youtubeFallbackEnabled,
+            libraryReuseConditionPolicy: conditionPolicy
         )
     }
 
@@ -615,7 +768,8 @@ final class AppModel: ObservableObject {
         playlist: Playlist,
         trigger: SyncTrigger,
         command: SLDLCommand,
-        youtubeFallbackEnabled: Bool
+        youtubeFallbackEnabled: Bool,
+        libraryReuseConditionPolicy: LibraryReuseConditionPolicy
     ) {
         let run = SyncRun(
             playlistID: playlist.id,
@@ -636,7 +790,8 @@ final class AppModel: ObservableObject {
                     runID: run.id,
                     playlist: playlist,
                     command: command,
-                    youtubeFallbackEnabled: youtubeFallbackEnabled
+                    youtubeFallbackEnabled: youtubeFallbackEnabled,
+                    libraryReuseConditionPolicy: libraryReuseConditionPolicy
                 )
             }
         }
@@ -659,12 +814,19 @@ final class AppModel: ObservableObject {
         trigger: SyncTrigger,
         youtubePolicy: YouTubePolicy
     ) -> SyncQueueItem {
-        SyncQueueItem(
+        let conditionPolicy = libraryReuseConditionPolicy
+        return SyncQueueItem(
             playlist: playlist,
             trigger: trigger,
             youtubePolicy: youtubePolicy,
-            command: commandBuilder.command(for: playlist, settings: settings, youtubePolicy: youtubePolicy),
-            youtubeFallbackEnabled: youtubePolicy.allowsFallback(using: settings)
+            command: commandBuilder.command(
+                for: playlist,
+                settings: settings,
+                youtubePolicy: youtubePolicy,
+                libraryReuseConditionPolicy: conditionPolicy
+            ),
+            youtubeFallbackEnabled: youtubePolicy.allowsFallback(using: settings),
+            libraryReuseConditionPolicy: conditionPolicy
         )
     }
 
@@ -675,7 +837,8 @@ final class AppModel: ObservableObject {
             playlist: next.playlist,
             trigger: next.trigger,
             command: next.command,
-            youtubeFallbackEnabled: next.youtubeFallbackEnabled
+            youtubeFallbackEnabled: next.youtubeFallbackEnabled,
+            libraryReuseConditionPolicy: next.libraryReuseConditionPolicy
         )
     }
 
@@ -717,7 +880,8 @@ final class AppModel: ObservableObject {
         runID: UUID,
         playlist: Playlist,
         command: SLDLCommand,
-        youtubeFallbackEnabled: Bool
+        youtubeFallbackEnabled: Bool,
+        libraryReuseConditionPolicy: LibraryReuseConditionPolicy
     ) async {
         liveRunProgress[runID] = SockseekProgressTracker(youtubeFallbackEnabled: youtubeFallbackEnabled)
         updateRun(runID) {
@@ -732,6 +896,12 @@ final class AppModel: ObservableObject {
             var finalTracker = SockseekProgressTracker(youtubeFallbackEnabled: youtubeFallbackEnabled)
             finalTracker.consume(result.output)
             liveRunProgress.removeValue(forKey: runID)
+            await reconcileLibraryAnalysis(
+                playlist: playlist,
+                progressSeeds: finalTracker.playlistTracks,
+                command: command,
+                conditionPolicy: libraryReuseConditionPolicy
+            )
             let counts = Self.counts(from: result.output, fallbackTrackCount: playlist.trackCount)
             let completedItems = counts.added + counts.upgraded + counts.alreadyBest
             let phase: RunPhase
@@ -775,6 +945,33 @@ final class AppModel: ObservableObject {
                 trackFailures: progress?.failures,
                 message: error.localizedDescription
             )
+        }
+    }
+
+    private func reconcileLibraryAnalysis(
+        playlist: Playlist,
+        progressSeeds: [PlaylistTrackSeed],
+        command: SLDLCommand,
+        conditionPolicy: LibraryReuseConditionPolicy
+    ) async {
+        guard command.arguments.contains("--skip-music-dir") || libraryAnalyses[playlist.id] != nil else { return }
+        let previousAnalysis = libraryAnalyses[playlist.id]
+        do {
+            guard let analysis = try await LibraryReuseAnalyzer().completedAnalysis(
+                playlist: playlist,
+                seeds: progressSeeds,
+                previousAnalysis: previousAnalysis,
+                command: command,
+                conditionPolicy: conditionPolicy
+            ) else {
+                libraryAnalysisMessages[playlist.id] = "The sync finished, but no readable stable index was available to refresh its track inventory."
+                return
+            }
+            libraryAnalyses[playlist.id] = analysis
+            applyLibraryAnalysisSummary(analysis)
+            libraryAnalysisMessages[playlist.id] = "Track inventory updated from the completed Sockseek index."
+        } catch {
+            libraryAnalysisMessages[playlist.id] = "The sync finished, but its track inventory could not be refreshed: \(error.localizedDescription)"
         }
     }
 
@@ -848,6 +1045,23 @@ final class AppModel: ObservableObject {
         }
     }
 
+    private func applyLibraryAnalysisSummary(_ analysis: PlaylistLibraryAnalysis) {
+        func apply(_ playlist: inout Playlist) {
+            playlist.trackCount = analysis.tracks.count
+            playlist.localCount = analysis.referenceCount + analysis.downloadedCount
+            playlist.upgradeCandidates = analysis.belowThresholdCount
+            if playlist.health == .ready, playlist.localCount < playlist.trackCount {
+                playlist.health = .partial
+            }
+        }
+        if let index = importedPlaylists.firstIndex(where: { $0.id == analysis.playlistID }) {
+            apply(&importedPlaylists[index])
+        }
+        if let index = liveSpotifyPlaylists.firstIndex(where: { $0.id == analysis.playlistID }) {
+            apply(&liveSpotifyPlaylists[index])
+        }
+    }
+
     private func nextDailyRun(after date: Date) -> Date {
         var components = Calendar.current.dateComponents([.year, .month, .day], from: date)
         components.hour = settings.dailyHour
@@ -856,6 +1070,45 @@ final class AppModel: ObservableObject {
         let today = Calendar.current.date(from: components) ?? date.addingTimeInterval(86_400)
         if today > date { return today }
         return Calendar.current.date(byAdding: .day, value: 1, to: today) ?? date.addingTimeInterval(86_400)
+    }
+
+    private var libraryReuseConditionPolicy: LibraryReuseConditionPolicy {
+        let mappings: [(String, String)] = [
+            ("format", "--format"),
+            ("length-tol", "--length-tol"),
+            ("min-bitrate", "--min-bitrate"),
+            ("max-bitrate", "--max-bitrate"),
+            ("min-samplerate", "--min-samplerate"),
+            ("max-samplerate", "--max-samplerate"),
+            ("min-bitdepth", "--min-bitdepth"),
+            ("max-bitdepth", "--max-bitdepth"),
+            ("strict-title", "--strict-title"),
+            ("strict-artist", "--strict-artist"),
+            ("strict-album", "--strict-album"),
+            ("accept-no-length", "--accept-no-length"),
+            ("cond", "--cond"),
+            ("pref-length-tol", "--pref-length-tol"),
+            ("pref-max-bitrate", "--pref-max-bitrate"),
+            ("pref-min-samplerate", "--pref-min-samplerate"),
+            ("pref-max-samplerate", "--pref-max-samplerate"),
+            ("pref-min-bitdepth", "--pref-min-bitdepth"),
+            ("pref-max-bitdepth", "--pref-max-bitdepth"),
+            ("pref-strict-title", "--pref-strict-title"),
+            ("pref-strict-artist", "--pref-strict-artist"),
+            ("pref-strict-album", "--pref-strict-album"),
+            ("pref-accept-no-length", "--pref-accept-no-length"),
+            ("pref", "--pref"),
+            ("strict-conditions", "--strict-conditions"),
+            ("skip-check-cond", "--skip-check-cond")
+        ]
+        let profile = settings.profileName.trimmingCharacters(in: .whitespacesAndNewlines)
+        var arguments: [String] = []
+        for (key, option) in mappings {
+            let profileValue = profile.isEmpty ? nil : configDocument.value(for: key, section: profile)
+            guard let value = profileValue ?? configDocument.value(for: key) else { continue }
+            arguments += [option, value]
+        }
+        return LibraryReuseConditionPolicy(arguments: arguments)
     }
 
     private func removeFixturePlans() {
@@ -877,7 +1130,8 @@ final class AppModel: ObservableObject {
             cachedSpotifyPlaylists: liveSpotifyPlaylists,
             plans: plans,
             runs: Array(runs.prefix(30)),
-            settings: safeSettings
+            settings: safeSettings,
+            libraryAnalyses: libraryAnalyses
         )
         do {
             try persistence.save(state)
@@ -1079,6 +1333,8 @@ private extension ClientSettings {
         merged.dailyHour = other.dailyHour
         merged.dailyMinute = other.dailyMinute
         merged.liveSchedulingArmed = other.liveSchedulingArmed
+        merged.libraryReuseEnabled = other.libraryReuseEnabled
+        merged.libraryDirectory = other.libraryDirectory
         return merged
     }
 }

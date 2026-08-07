@@ -106,7 +106,8 @@ struct SpotifyService {
                     needsReview: 0,
                     lastSyncedAt: nil,
                     health: .neverSynced,
-                    isFixture: false
+                    isFixture: false,
+                    snapshotID: item.snapshotID
                 )
             })
             if let next = page.next {
@@ -177,10 +178,12 @@ private struct SpotifyPlaylist: Decodable {
     let externalURLs: SpotifyExternalURLs?
     let tracks: SpotifyTotal?
     let items: SpotifyTotal?
+    let snapshotID: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, description, owner, images, tracks, items
         case externalURLs = "external_urls"
+        case snapshotID = "snapshot_id"
     }
 }
 

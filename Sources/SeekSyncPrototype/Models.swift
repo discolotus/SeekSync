@@ -53,6 +53,7 @@ struct Playlist: Identifiable, Hashable, Codable {
     var lastSyncedAt: Date?
     var health: PlaylistHealth
     var isFixture: Bool?
+    var snapshotID: String? = nil
 
     var missingCount: Int { max(trackCount - localCount, 0) }
     var coverage: Double {
@@ -433,6 +434,10 @@ struct ClientSettings: Codable, Equatable {
     var dailyHour = 2
     var dailyMinute = 0
     var liveSchedulingArmed: Bool?
+    // App-local preferences. Optional storage keeps state written by older
+    // SeekSync versions decodable without a migration step.
+    var libraryReuseEnabled: Bool?
+    var libraryDirectory: String?
 
     var soulseekUsername = ""
     var soulseekPassword = ""
@@ -464,6 +469,12 @@ struct ClientSettings: Codable, Equatable {
     }
 
     var isLiveSchedulingArmed: Bool { liveSchedulingArmed == true }
+
+    var isLibraryReuseEnabled: Bool { libraryReuseEnabled == true }
+
+    var libraryDirectoryPath: String {
+        libraryDirectory?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
 
     var canLoadSpotifyLibrary: Bool {
         if !spotifyAccessToken.isEmpty { return true }
@@ -537,6 +548,7 @@ struct PrototypeState: Codable {
     var plans: [SyncPlan]
     var runs: [SyncRun]
     var settings: ClientSettings
+    var libraryAnalyses: [String: PlaylistLibraryAnalysis]? = nil
 }
 
 extension Date {

@@ -5,7 +5,8 @@ struct SockseekCommandBuilder {
         for playlist: Playlist,
         settings: ClientSettings,
         youtubePolicy: YouTubePolicy = .inherit,
-        maximumTracks: Int? = nil
+        maximumTracks: Int? = nil,
+        libraryReuseConditionPolicy: LibraryReuseConditionPolicy = LibraryReuseConditionPolicy(arguments: [])
     ) -> SLDLCommand {
         var arguments = [playlist.spotifyURL]
         if let maximumTracks, maximumTracks > 0 {
@@ -17,10 +18,22 @@ struct SockseekCommandBuilder {
         }
         arguments += ["--output-dir", settings.outputDirectory]
         arguments += ["--pref-format", settings.preferredFormatValue]
+        arguments += ["--pref-min-bitrate", settings.preferredMinBitrateConfigValue]
         arguments += ["--index-path", indexPath(for: playlist, outputDirectory: settings.outputDirectory)]
+        arguments += ["--skip-mode-output-dir", "index"]
         arguments += ["--progress-json", "--no-progress"]
-        arguments += ["--write-playlist", settings.writeM3UPlaylist ? "true" : "false"]
-        arguments += ["--skip-check-pref-cond", settings.lookForPreferredQuality ? "true" : "false"]
+        let writesPlaylist = settings.writeM3UPlaylist || settings.isLibraryReuseEnabled
+        arguments += ["--write-playlist", writesPlaylist ? "true" : "false"]
+        if settings.isLibraryReuseEnabled, !settings.libraryDirectoryPath.isEmpty {
+            arguments += ["--skip-existing", "true"]
+            arguments += ["--skip-music-dir", settings.libraryDirectoryPath]
+            arguments += ["--skip-mode-music-dir", "tag"]
+            // Freeze the supported matching conditions into the command. A
+            // queued run must not silently adopt a later config/profile edit.
+            arguments += libraryReuseConditionPolicy.arguments
+        }
+        let checksPreferredQuality = settings.lookForPreferredQuality || settings.isLibraryReuseEnabled
+        arguments += ["--skip-check-pref-cond", checksPreferredQuality ? "true" : "false"]
 
         let allowYouTube = youtubePolicy.allowsFallback(using: settings)
         arguments += ["--yt-dlp", allowYouTube ? "true" : "false"]
