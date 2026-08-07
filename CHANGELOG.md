@@ -17,6 +17,8 @@ All notable changes to SeekSync are documented here. Versions follow
   reveal controls, and retain compatibility with previously saved app state.
 - Make save and reload behavior explicit, showing the Sockseek config and local
   app-data locations while clarifying that credentials are excluded from app state.
+- Store application state under `Application Support/SeekSync` and import the
+  previous `SeekSyncPrototype` state non-destructively on first launch.
 
 ## [0.2.1] - 2026-08-04
 

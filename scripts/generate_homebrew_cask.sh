@@ -44,6 +44,7 @@ mkdir -p "${output:h}"
     print -r -- '  app "SeekSync.app"'
     print -r -- ''
     print -r -- '  zap trash: ['
+    print -r -- '    "~/Library/Application Support/SeekSync",'
     print -r -- '    "~/Library/Application Support/SeekSyncPrototype",'
     print -r -- '    "~/Library/Caches/com.discolotus.SeekSync",'
     print -r -- '    "~/Library/Preferences/com.discolotus.SeekSync.plist",'

@@ -823,24 +823,37 @@ extension RunCounts {
 struct PrototypePersistence {
     private let fileManager: FileManager
     private let url: URL
+    private let legacyURL: URL?
 
     var storageURL: URL { url }
 
-    init(fileManager: FileManager = .default, url: URL? = nil) {
+    init(fileManager: FileManager = .default, url: URL? = nil, legacyURL: URL? = nil) {
         self.fileManager = fileManager
         if let url {
             self.url = url
+            self.legacyURL = legacyURL
         } else if let override = ProcessInfo.processInfo.environment["SEEKSYNC_STATE_PATH"], !override.isEmpty {
             self.url = URL(fileURLWithPath: NSString(string: override).expandingTildeInPath)
+            self.legacyURL = nil
         } else {
             self.url = fileManager.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/SeekSync/state.json")
+            self.legacyURL = legacyURL ?? fileManager.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support/SeekSyncPrototype/prototype-state.json")
         }
     }
 
     func load() throws -> PrototypeState {
-        let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode(PrototypeState.self, from: data)
+        if fileManager.fileExists(atPath: url.path) {
+            return try decode(from: url)
+        }
+        guard let legacyURL, fileManager.fileExists(atPath: legacyURL.path) else {
+            return try decode(from: url)
+        }
+
+        let state = try decode(from: legacyURL)
+        try? save(state)
+        return state
     }
 
     func save(_ state: PrototypeState) throws {
@@ -849,6 +862,11 @@ struct PrototypePersistence {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(state).write(to: url, options: .atomic)
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private func decode(from url: URL) throws -> PrototypeState {
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(PrototypeState.self, from: data)
     }
 }
 

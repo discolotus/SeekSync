@@ -231,6 +231,57 @@ final class ConfigDocumentTests: XCTestCase {
     }
 }
 
+final class PrototypePersistenceTests: XCTestCase {
+    private var root: URL!
+    private var currentURL: URL!
+    private var legacyURL: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent("SeekSyncPersistence-\(UUID().uuidString)")
+        currentURL = root.appendingPathComponent("SeekSync/state.json")
+        legacyURL = root.appendingPathComponent("SeekSyncPrototype/prototype-state.json")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testMigratesLegacyStateWithoutDeletingIt() throws {
+        let legacyState = state(outputDirectory: "~/Music/legacy")
+        try PrototypePersistence(url: legacyURL).save(legacyState)
+
+        let persistence = PrototypePersistence(url: currentURL, legacyURL: legacyURL)
+        let restored = try persistence.load()
+
+        XCTAssertEqual(restored.settings.outputDirectory, "~/Music/legacy")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: currentURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacyURL.path))
+        XCTAssertEqual(try PrototypePersistence(url: currentURL).load().settings.outputDirectory, "~/Music/legacy")
+    }
+
+    func testCurrentStateTakesPriorityOverLegacyState() throws {
+        try PrototypePersistence(url: legacyURL).save(state(outputDirectory: "~/Music/legacy"))
+        try PrototypePersistence(url: currentURL).save(state(outputDirectory: "~/Music/current"))
+
+        let restored = try PrototypePersistence(url: currentURL, legacyURL: legacyURL).load()
+
+        XCTAssertEqual(restored.settings.outputDirectory, "~/Music/current")
+    }
+
+    private func state(outputDirectory: String) -> PrototypeState {
+        var settings = ClientSettings()
+        settings.outputDirectory = outputDirectory
+        return PrototypeState(
+            importedPlaylists: [],
+            cachedSpotifyPlaylists: [],
+            plans: [],
+            runs: [],
+            settings: settings
+        )
+    }
+}
+
 final class ConfigStoreTests: XCTestCase {
     private var directory: URL!
     private var configURL: URL!
