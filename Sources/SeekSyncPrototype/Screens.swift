@@ -626,7 +626,7 @@ struct SettingsScreen: View {
                 SectionHeader(
                     eyebrow: "Preferences",
                     title: "Settings",
-                    detail: "Choose where music goes, the quality SeekSync prefers, and the accounts it uses."
+                    detail: "Choose where music goes, the quality SeekSync prefers, and the accounts it uses. Config changes save to Sockseek; automation and app data stay local."
                 )
 
                 GroupBox("Downloads") {
@@ -742,7 +742,7 @@ struct SettingsScreen: View {
                                 .foregroundStyle(.red)
                                 .accessibilityLabel("Spotify error: \(detail)")
                         }
-                        Text("Access tokens stay hidden. Account changes are written only when you press Save Changes.")
+                        Text("Access tokens stay hidden. Account changes are written to the Sockseek config only when you choose Save to Config below.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     .padding(4)
@@ -778,7 +778,7 @@ struct SettingsScreen: View {
                              : "Disarmed: daily live jobs will not start automatically.")
                             .font(.caption)
                             .foregroundStyle(model.settings.isLiveSchedulingArmed ? .orange : .secondary)
-                        Button("Save Prototype Preferences") { model.persistPreferences() }
+                        Button("Save Automation") { model.persistPreferences() }
                     }
                     .padding(4)
                 }
@@ -804,6 +804,35 @@ struct SettingsScreen: View {
                     .padding(4)
                 }
 
+                GroupBox("Storage & saving") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        LabeledContent("Sockseek config") {
+                            pathText(model.settings.configPath)
+                        }
+                        Text("Downloads, quality, fallback, and account changes are written to this file only when you choose Save to Config. Reload from Config discards any unsaved config edits.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(model.configMessage)
+                            .font(.caption)
+                            .foregroundStyle(model.isConfigDirty ? .orange : .secondary)
+                        HStack {
+                            Button("Reload from Config") { requestReload() }
+                            Spacer()
+                            Button("Save to Config") { model.saveConfig() }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!model.isConfigDirty || credentialsEditing)
+                        }
+                        Divider()
+                        LabeledContent("Local app data") {
+                            pathText(model.localAppDataPath)
+                        }
+                        Text("SeekSync restores playlists, activity, automation, and interface state from this local file when it starts. Account credentials and access tokens are excluded from it.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(4)
+                }
+
                 DisclosureGroup(isExpanded: $advancedExpanded) {
                     VStack(alignment: .leading, spacing: 12) {
                         LabeledContent("Sockseek executable") {
@@ -818,7 +847,6 @@ struct SettingsScreen: View {
                                 pathText(model.settings.configPath)
                                 Button("Choose…") { chooseConfigFile() }
                                     .disabled(model.isConfigDirty)
-                                Button("Reload") { requestReload() }
                             }
                         }
                         LabeledContent("Config profile", value: model.settings.profileName.isEmpty ? "Global settings" : model.settings.profileName)
@@ -833,20 +861,8 @@ struct SettingsScreen: View {
                 }
                 .padding(.horizontal, 8)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(model.configMessage)
-                        .font(.caption)
-                        .foregroundStyle(model.isConfigDirty ? .orange : .secondary)
-                    HStack {
-                        Button("Reset App Data", role: .destructive) { showResetConfirmation = true }
-                            .disabled(model.activeRun != nil)
-                        Spacer()
-                        Button("Reload") { requestReload() }
-                        Button("Save Changes") { model.saveConfig() }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(!model.isConfigDirty || credentialsEditing)
-                    }
-                }
+                Button("Reset App Data", role: .destructive) { showResetConfirmation = true }
+                    .disabled(model.activeRun != nil)
             }
             .padding(22)
             .frame(maxWidth: 760)
@@ -877,10 +893,10 @@ struct SettingsScreen: View {
             isPresented: $showReloadConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Discard and Reload", role: .destructive) { model.reloadConfig() }
+            Button("Discard and Reload Config", role: .destructive) { model.reloadConfig() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Reloading replaces the unsaved values currently shown in Settings.")
+            Text("Reloading from the Sockseek config replaces the unsaved config values currently shown in Settings. Locally saved automation and app data are not changed.")
         }
         .confirmationDialog(
             "Use a new downloads folder?",

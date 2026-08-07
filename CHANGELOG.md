@@ -15,6 +15,8 @@ All notable changes to SeekSync are documented here. Versions follow
   preserving custom existing values.
 - Keep account credentials locked until Edit is chosen, add intentional secret
   reveal controls, and retain compatibility with previously saved app state.
+- Make save and reload behavior explicit, showing the Sockseek config and local
+  app-data locations while clarifying that credentials are excluded from app state.
 
 ## [0.2.1] - 2026-08-04
 

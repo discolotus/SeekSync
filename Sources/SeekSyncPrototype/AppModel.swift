@@ -130,6 +130,10 @@ final class AppModel: ObservableObject {
         return allPlaylists.first { $0.id == selectedPlaylistID }
     }
 
+    var localAppDataPath: String {
+        persistence.storageURL.path
+    }
+
     var activeRun: SyncRun? { runs.first(where: { $0.phase.isActive }) }
     var attentionCount: Int { allPlaylists.filter(needsAttention).count }
     var enabledPlanCount: Int { plans.filter { $0.enabled && playlist(for: $0) != nil }.count }
@@ -378,7 +382,7 @@ final class AppModel: ObservableObject {
         for index in plans.indices where plans[index].enabled {
             plans[index].nextRunAt = nextDailyRun(after: Date())
         }
-        if persist() { toastMessage = "Prototype preferences and daily run times saved." }
+        if persist() { toastMessage = "Automation preferences and daily run times saved locally." }
     }
 
     func setBinaryPath(_ path: String) {
@@ -819,6 +823,8 @@ extension RunCounts {
 struct PrototypePersistence {
     private let fileManager: FileManager
     private let url: URL
+
+    var storageURL: URL { url }
 
     init(fileManager: FileManager = .default, url: URL? = nil) {
         self.fileManager = fileManager
