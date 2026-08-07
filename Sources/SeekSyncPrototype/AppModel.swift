@@ -19,6 +19,9 @@ struct SyncQueueItem: Identifiable, Equatable {
     let playlist: Playlist
     let trigger: SyncTrigger
     let youtubePolicy: YouTubePolicy
+    let command: SLDLCommand
+    let youtubeFallbackEnabled: Bool
+    let queuedAt = Date()
 }
 
 @MainActor
@@ -147,6 +150,7 @@ final class AppModel: ObservableObject {
     var attentionCount: Int { allPlaylists.filter(needsAttention).count }
     var enabledPlanCount: Int { plans.filter { $0.enabled && playlist(for: $0) != nil }.count }
     var queuedSyncCount: Int { syncQueue.count }
+    var queuedSyncs: [SyncQueueItem] { syncQueue }
 
     func playlist(for plan: SyncPlan) -> Playlist? {
         allPlaylists.first { $0.id == plan.playlistID }
@@ -252,16 +256,30 @@ final class AppModel: ObservableObject {
     func confirmPendingSync() {
         guard let pendingSync else { return }
         self.pendingSync = nil
-        startSync(playlist: pendingSync.playlist, trigger: pendingSync.trigger, youtubePolicy: pendingSync.youtubePolicy)
+        if activeRun == nil {
+            startSync(playlist: pendingSync.playlist, trigger: pendingSync.trigger, youtubePolicy: pendingSync.youtubePolicy)
+        } else {
+            enqueueSync(
+                playlist: pendingSync.playlist,
+                trigger: pendingSync.trigger,
+                youtubePolicy: pendingSync.youtubePolicy
+            )
+        }
+    }
+
+    func isQueued(_ playlistID: String) -> Bool {
+        syncQueue.contains { $0.playlist.id == playlistID }
+    }
+
+    func removeQueuedSync(_ id: UUID) {
+        guard let index = syncQueue.firstIndex(where: { $0.id == id }) else { return }
+        let removed = syncQueue.remove(at: index)
+        toastMessage = "Removed \(removed.playlist.name) from the sync queue."
     }
 
     func confirmPendingBatchSync() {
         guard let pending = pendingBatchSync else { return }
         pendingBatchSync = nil
-        guard activeRun == nil else {
-            toastMessage = "Another sync is already running."
-            return
-        }
         let hasLiveSync = pending.playlists.contains { $0.executionKind == .sockseek }
         if hasLiveSync, !dependencyState.isReady {
             toastMessage = "Sockseek 3 must be ready before live syncs can start."
@@ -272,10 +290,19 @@ final class AppModel: ObservableObject {
             return
         }
 
-        syncQueue = pending.playlists.map {
-            SyncQueueItem(playlist: $0, trigger: .manual, youtubePolicy: pending.youtubePolicy)
+        let queuedPlaylistIDs = Set(syncQueue.map(\.playlist.id))
+        let candidates = pending.playlists.filter {
+            $0.id != activeRun?.playlistID && !queuedPlaylistIDs.contains($0.id)
         }
-        startNextQueuedSync()
+        guard !candidates.isEmpty else {
+            toastMessage = "Those playlists are already syncing or queued."
+            return
+        }
+        syncQueue.append(contentsOf: candidates.map {
+            makeQueueItem(playlist: $0, trigger: .manual, youtubePolicy: pending.youtubePolicy)
+        })
+        if activeRun == nil { startNextQueuedSync() }
+        toastMessage = "Queued \(candidates.count) playlist\(candidates.count == 1 ? "" : "s") for sync."
     }
 
     func command(for pending: PendingSync) -> SLDLCommand {
@@ -411,8 +438,8 @@ final class AppModel: ObservableObject {
     }
 
     func resetPrototypeData() {
-        guard activeRun == nil else {
-            toastMessage = "Cancel the active sync and wait for it to stop before resetting prototype data."
+        guard activeRun == nil, queuedSyncs.isEmpty else {
+            toastMessage = "Cancel the active sync and clear the queue before resetting prototype data."
             return
         }
         importedPlaylists = []
@@ -554,19 +581,11 @@ final class AppModel: ObservableObject {
 
     func cancelActiveRun() {
         guard let active = activeRun else { return }
-        let cancelledQueueCount = syncQueue.count
-        syncQueue.removeAll()
         updateRun(active.id) { $0.message = "Cancelling…" }
         activeRunTask?.cancel()
-        if cancelledQueueCount > 0 {
-            toastMessage = "Cancelling the current sync and cleared \(cancelledQueueCount) queued playlist\(cancelledQueueCount == 1 ? "" : "s")."
+        if !syncQueue.isEmpty {
+            toastMessage = "Cancelling the current sync. The next queued playlist will start automatically."
         }
-    }
-
-    private func startNextQueuedSync() {
-        guard activeRun == nil, !syncQueue.isEmpty else { return }
-        let next = syncQueue.removeFirst()
-        startSync(playlist: next.playlist, trigger: next.trigger, youtubePolicy: next.youtubePolicy)
     }
 
     private func startSync(playlist: Playlist, trigger: SyncTrigger, youtubePolicy: YouTubePolicy) {
@@ -584,6 +603,20 @@ final class AppModel: ObservableObject {
         }
         let command = commandBuilder.command(for: playlist, settings: settings, youtubePolicy: youtubePolicy)
         let youtubeFallbackEnabled = youtubePolicy.allowsFallback(using: settings)
+        launchSync(
+            playlist: playlist,
+            trigger: trigger,
+            command: command,
+            youtubeFallbackEnabled: youtubeFallbackEnabled
+        )
+    }
+
+    private func launchSync(
+        playlist: Playlist,
+        trigger: SyncTrigger,
+        command: SLDLCommand,
+        youtubeFallbackEnabled: Bool
+    ) {
         let run = SyncRun(
             playlistID: playlist.id,
             playlistName: playlist.name,
@@ -607,6 +640,43 @@ final class AppModel: ObservableObject {
                 )
             }
         }
+    }
+
+    private func enqueueSync(playlist: Playlist, trigger: SyncTrigger, youtubePolicy: YouTubePolicy) {
+        if activeRun?.playlistID == playlist.id || isQueued(playlist.id) {
+            toastMessage = "\(playlist.name) is already syncing or queued."
+            return
+        }
+        syncQueue.append(makeQueueItem(playlist: playlist, trigger: trigger, youtubePolicy: youtubePolicy))
+        let position = syncQueue.count
+        toastMessage = position == 1
+            ? "\(playlist.name) is next in the sync queue."
+            : "\(playlist.name) is number \(position) in the sync queue."
+    }
+
+    private func makeQueueItem(
+        playlist: Playlist,
+        trigger: SyncTrigger,
+        youtubePolicy: YouTubePolicy
+    ) -> SyncQueueItem {
+        SyncQueueItem(
+            playlist: playlist,
+            trigger: trigger,
+            youtubePolicy: youtubePolicy,
+            command: commandBuilder.command(for: playlist, settings: settings, youtubePolicy: youtubePolicy),
+            youtubeFallbackEnabled: youtubePolicy.allowsFallback(using: settings)
+        )
+    }
+
+    private func startNextQueuedSync() {
+        guard activeRun == nil, !syncQueue.isEmpty else { return }
+        let next = syncQueue.removeFirst()
+        launchSync(
+            playlist: next.playlist,
+            trigger: next.trigger,
+            command: next.command,
+            youtubeFallbackEnabled: next.youtubeFallbackEnabled
+        )
     }
 
     private func previewDemoRun(runID: UUID, playlist: Playlist) async {

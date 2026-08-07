@@ -190,9 +190,14 @@ struct SyncPreviewSheet: View {
 
             Divider()
             HStack {
+                if model.activeRun != nil, startBlocker == nil {
+                    Text("This playlist will start automatically when the current sync finishes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(isLiveSync ? "Start Sync" : "Run Preview") {
+                Button(primaryButtonTitle) {
                     model.confirmPendingSync()
                     dismiss()
                 }
@@ -229,7 +234,12 @@ struct SyncPreviewSheet: View {
     }
 
     private var startBlocker: String? {
-        if model.activeRun != nil { return "Another sync is already running." }
+        if model.activeRun?.playlistID == pending.playlist.id {
+            return "This playlist is already syncing."
+        }
+        if model.isQueued(pending.playlist.id) {
+            return "This playlist is already in the sync queue."
+        }
         if pending.playlist.executionKind == .sockseek, model.isConfigDirty {
             return "Save or reload the edited settings before starting a live run."
         }
@@ -237,6 +247,11 @@ struct SyncPreviewSheet: View {
             return "Sockseek 3 must be ready before a live run can start."
         }
         return nil
+    }
+
+    private var primaryButtonTitle: String {
+        if model.activeRun != nil { return isLiveSync ? "Queue Sync" : "Queue Preview" }
+        return isLiveSync ? "Start Sync" : "Run Preview"
     }
 }
 
@@ -358,7 +373,7 @@ struct BatchSyncPreviewSheet: View {
                     } else if hasLiveSyncs {
                         SyncNotice(
                             title: "This starts real downloads",
-                            detail: "Each playlist will search for missing or below-target tracks after you confirm. The remaining queue stops if you cancel.",
+                            detail: "Each playlist will search for missing or below-target tracks after you confirm. Cancelling the current sync advances to the next queued playlist.",
                             systemImage: "arrow.down.circle.fill",
                             color: .orange
                         )
@@ -379,7 +394,7 @@ struct BatchSyncPreviewSheet: View {
                 Spacer()
                 Button("Cancel") { dismiss() }
                     .keyboardShortcut(.cancelAction)
-                Button(hasLiveSyncs ? "Start \(pending.playlists.count) Syncs" : "Run \(pending.playlists.count) Previews") {
+                Button(batchButtonTitle) {
                     model.confirmPendingBatchSync()
                     dismiss()
                 }
@@ -401,7 +416,6 @@ struct BatchSyncPreviewSheet: View {
     }
 
     private var startBlocker: String? {
-        if model.activeRun != nil { return "Another sync is already running." }
         if hasLiveSyncs, model.isConfigDirty {
             return "Save or reload the edited settings before starting live syncs."
         }
@@ -409,6 +423,13 @@ struct BatchSyncPreviewSheet: View {
             return "Sockseek 3 must be ready before live syncs can start."
         }
         return nil
+    }
+
+    private var batchButtonTitle: String {
+        if model.activeRun != nil {
+            return hasLiveSyncs ? "Queue \(pending.playlists.count) Syncs" : "Queue \(pending.playlists.count) Previews"
+        }
+        return hasLiveSyncs ? "Start \(pending.playlists.count) Syncs" : "Run \(pending.playlists.count) Previews"
     }
 }
 

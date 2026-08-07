@@ -16,7 +16,7 @@ struct AppSidebar: View {
                     sidebarRow(.syncPool, badge: model.plans.count)
                 }
                 Section("Runs") {
-                    sidebarRow(.activity, badge: model.activeRun == nil ? nil : 1)
+                    sidebarRow(.activity, badge: (model.activeRun == nil ? 0 : 1) + model.queuedSyncCount)
                     sidebarRow(.attention, badge: model.attentionCount)
                 }
                 Section {
@@ -137,7 +137,7 @@ struct BatchSyncScreen: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button(model.queuedSyncCount > 0 ? "Cancel batch" : "Cancel sync") {
+                        Button("Cancel current") {
                             model.cancelActiveRun()
                         }
                         .controlSize(.small)
@@ -332,6 +332,9 @@ struct PlaylistLibraryScreen: View {
                             .stroke(Color.blue.opacity(0.2))
                     }
                     .accessibilityElement(children: .contain)
+                }
+                if !model.queuedSyncs.isEmpty {
+                    SyncQueueView(compact: true)
                 }
                 HStack {
                     TextField("Search playlists", text: $model.searchText)
@@ -691,11 +694,81 @@ struct ActivityScreen: View {
             Divider()
             ScrollView {
                 LazyVStack(spacing: 12) {
+                    if !model.queuedSyncs.isEmpty {
+                        SyncQueueView()
+                    }
                     ForEach(model.runs) { run in RunRow(run: run) }
                 }
                 .padding(16)
             }
         }
+    }
+}
+
+struct SyncQueueView: View {
+    @EnvironmentObject private var model: AppModel
+    var compact = false
+
+    private var displayedItems: [SyncQueueItem] {
+        compact ? Array(model.queuedSyncs.prefix(3)) : model.queuedSyncs
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Up next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                    .font(.headline)
+                Spacer()
+                Text("\(model.queuedSyncCount) queued")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(Array(displayedItems.enumerated()), id: \.element.id) { index, item in
+                HStack(spacing: 10) {
+                    Text("\(index + 1)")
+                        .font(.caption.bold().monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .frame(width: 18)
+                    PlaylistArtwork(playlist: item.playlist, size: 32)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.playlist.name)
+                            .font(.callout.weight(.semibold))
+                            .lineLimit(1)
+                        Text("\(item.trigger.rawValue) · \(queuedLabel(item.queuedAt))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button {
+                        model.removeQueuedSync(item.id)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .help("Remove \(item.playlist.name) from queue")
+                    .accessibilityLabel("Remove \(item.playlist.name) from sync queue")
+                }
+            }
+            if compact, model.queuedSyncCount > displayedItems.count {
+                Text("+\(model.queuedSyncCount - displayedItems.count) more in Activity")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+        }
+        .padding(12)
+        .background(Color.accentColor.opacity(0.05), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.accentColor.opacity(0.15))
+        }
+    }
+
+    private func queuedLabel(_ date: Date) -> String {
+        if abs(date.timeIntervalSinceNow) < 60 { return "queued just now" }
+        return "queued \(date.relativeLabel)"
     }
 }
 

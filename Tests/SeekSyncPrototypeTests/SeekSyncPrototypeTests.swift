@@ -78,6 +78,20 @@ final class SeekSyncVisualRenderTests: XCTestCase {
         let liveSyncPreview = SyncPreviewSheet(pending: livePendingSync)
             .environmentObject(liveModel)
 
+        let queueModel = AppModel()
+        queueModel.showSyncPreview(for: Playlist.samples[0])
+        queueModel.confirmPendingSync()
+        queueModel.showSyncPreview(for: Playlist.samples[1])
+        queueModel.confirmPendingSync()
+        queueModel.showSyncPreview(for: Playlist.samples[2])
+        queueModel.confirmPendingSync()
+        let queue = SyncQueueView()
+            .environmentObject(queueModel)
+            .padding(16)
+            .frame(width: 620, height: 250)
+            .background(Color(nsColor: .windowBackgroundColor))
+
+        let queuePNG = try renderPNG(AnyView(queue), size: NSSize(width: 620, height: 250))
         let compactPNG = try renderPNG(AnyView(compact), size: NSSize(width: 994, height: 624))
         let standardPNG = try renderPNG(AnyView(standard), size: NSSize(width: 1_180, height: 720))
         let batchSyncPNG = try renderPNG(AnyView(batchSync), size: NSSize(width: 980, height: 720))
@@ -178,6 +192,7 @@ final class SeekSyncVisualRenderTests: XCTestCase {
         XCTAssertGreaterThan(settingsPNG.count, 10_000)
         XCTAssertGreaterThan(syncPreviewPNG.count, 10_000)
         XCTAssertGreaterThan(liveSyncPreviewPNG.count, 10_000)
+        XCTAssertGreaterThan(queuePNG.count, 8_000)
         XCTAssertGreaterThan(brandHeaderPNG.count, 8_000)
         XCTAssertGreaterThan(identityComparisonPNG.count, 12_000)
         XCTAssertGreaterThan(failureDetailsPNG.count, 10_000)
@@ -192,10 +207,12 @@ final class SeekSyncVisualRenderTests: XCTestCase {
             try settingsPNG.write(to: outputDirectory.appendingPathComponent("implementation-settings-660x560@2x.png"), options: .atomic)
             try syncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-sync-preview-660x520@2x.png"), options: .atomic)
             try liveSyncPreviewPNG.write(to: outputDirectory.appendingPathComponent("implementation-live-sync-preview-660x520@2x.png"), options: .atomic)
+            try queuePNG.write(to: outputDirectory.appendingPathComponent("implementation-sync-queue-620x250@2x.png"), options: .atomic)
             try brandHeaderPNG.write(to: outputDirectory.appendingPathComponent("implementation-brand-header-320x80@2x.png"), options: .atomic)
             try identityComparisonPNG.write(to: outputDirectory.appendingPathComponent("comparison-app-icon-vs-brand-header-640x160@2x.png"), options: .atomic)
             try failureDetailsPNG.write(to: outputDirectory.appendingPathComponent("implementation-track-failure-details-680x330@2x.png"), options: .atomic)
         }
+        queueModel.cancelActiveRun()
     }
 
     private func renderPNG(_ view: AnyView, size: NSSize) throws -> Data {
@@ -791,6 +808,76 @@ final class SyncExecutionKindTests: XCTestCase {
 
         XCTAssertEqual(realPlaylist.executionKind, .sockseek)
         XCTAssertEqual(Playlist.samples[0].executionKind, .previewOnly)
+    }
+}
+
+@MainActor
+final class SyncQueueTests: XCTestCase {
+    func testConfirmedSyncsQueueInFIFOOrderAndRejectDuplicates() {
+        let model = AppModel()
+        let first = Playlist.samples[0]
+        let second = Playlist.samples[1]
+        let third = Playlist.samples[2]
+
+        model.showSyncPreview(for: first)
+        model.confirmPendingSync()
+        model.showSyncPreview(for: second)
+        model.confirmPendingSync()
+        model.showSyncPreview(for: third)
+        model.confirmPendingSync()
+        model.showSyncPreview(for: second)
+        model.confirmPendingSync()
+
+        XCTAssertEqual(model.activeRun?.playlistID, first.id)
+        XCTAssertEqual(model.queuedSyncs.map(\.playlist.id), [second.id, third.id])
+        XCTAssertEqual(model.queuedSyncCount, 2)
+        XCTAssertEqual(model.toastMessage, "\(second.name) is already syncing or queued.")
+
+        model.cancelActiveRun()
+    }
+
+    func testCancellingCurrentSyncAutomaticallyStartsNextQueuedPlaylist() async throws {
+        let model = AppModel()
+        let first = Playlist.samples[0]
+        let second = Playlist.samples[1]
+
+        model.showSyncPreview(for: first)
+        model.confirmPendingSync()
+        model.showSyncPreview(for: second)
+        model.confirmPendingSync()
+        let confirmedCommand = model.queuedSyncs[0].command.displayString
+        model.settings.outputDirectory = "/tmp/changed-after-confirmation"
+        model.cancelActiveRun()
+
+        for _ in 0..<50 where model.activeRun?.playlistID != second.id {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        XCTAssertEqual(model.activeRun?.playlistID, second.id)
+        XCTAssertEqual(model.activeRun?.commandPreview, confirmedCommand)
+        XCTAssertFalse(confirmedCommand.contains("changed-after-confirmation"))
+        XCTAssertTrue(model.queuedSyncs.isEmpty)
+
+        model.cancelActiveRun()
+    }
+
+    func testQueuedSyncCanBeRemoved() {
+        let model = AppModel()
+        let first = Playlist.samples[0]
+        let second = Playlist.samples[1]
+
+        model.showSyncPreview(for: first)
+        model.confirmPendingSync()
+        model.showSyncPreview(for: second)
+        model.confirmPendingSync()
+        let queuedID = model.queuedSyncs[0].id
+
+        model.removeQueuedSync(queuedID)
+
+        XCTAssertTrue(model.queuedSyncs.isEmpty)
+        XCTAssertEqual(model.toastMessage, "Removed \(second.name) from the sync queue.")
+
+        model.cancelActiveRun()
     }
 }
 
