@@ -130,6 +130,10 @@ final class AppModel: ObservableObject {
         return allPlaylists.first { $0.id == selectedPlaylistID }
     }
 
+    var localAppDataPath: String {
+        persistence.storageURL.path
+    }
+
     var activeRun: SyncRun? { runs.first(where: { $0.phase.isActive }) }
     var attentionCount: Int { allPlaylists.filter(needsAttention).count }
     var enabledPlanCount: Int { plans.filter { $0.enabled && playlist(for: $0) != nil }.count }
@@ -378,12 +382,12 @@ final class AppModel: ObservableObject {
         for index in plans.indices where plans[index].enabled {
             plans[index].nextRunAt = nextDailyRun(after: Date())
         }
-        if persist() { toastMessage = "Prototype preferences and daily run times saved." }
+        if persist() { toastMessage = "Automation preferences and daily run times saved locally." }
     }
 
     func setBinaryPath(_ path: String) {
         settings.binaryPath = path
-        markConfigDirty()
+        persist()
         let expanded = NSString(string: path).expandingTildeInPath
         guard FileManager.default.isExecutableFile(atPath: expanded) else {
             dependencyState = .missing
@@ -396,6 +400,75 @@ final class AppModel: ObservableObject {
             guard NSString(string: self.settings.binaryPath).expandingTildeInPath == expanded else { return }
             self.dependencyState = state
         }
+    }
+
+    func useAutomaticBinaryPath() {
+        setBinaryPath(ConfigStore.detectedBinaryPath())
+        toastMessage = "Sockseek location set automatically."
+    }
+
+    func checkSockseek() {
+        let expanded = NSString(string: settings.binaryPath).expandingTildeInPath
+        dependencyState = .checking
+        Task { [weak self] in
+            guard let self else { return }
+            self.dependencyState = await self.processRunner.version(at: expanded)
+        }
+    }
+
+    func setConfigPath(_ path: String) {
+        settings.configPath = path
+        reloadConfig()
+    }
+
+    func updateOutputDirectory(_ path: String) {
+        guard settings.outputDirectory != path else { return }
+        settings.outputDirectory = path
+        markConfigDirty()
+        toastMessage = "Downloads folder updated. Save changes to apply it."
+    }
+
+    func moveLibraryAndUpdateOutputDirectory(to path: String) async {
+        guard activeRun == nil else {
+            toastMessage = "Wait for the active sync to finish before moving the library."
+            return
+        }
+        let sourcePath = NSString(string: settings.outputDirectory).expandingTildeInPath
+        let destinationPath = NSString(string: path).expandingTildeInPath
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                try LibraryMover().moveContents(
+                    from: URL(fileURLWithPath: sourcePath, isDirectory: true),
+                    to: URL(fileURLWithPath: destinationPath, isDirectory: true)
+                )
+            }.value
+            settings.outputDirectory = path
+            markConfigDirty()
+            let itemLabel = result.movedItemCount == 1 ? "item" : "items"
+            toastMessage = result.movedItemCount == 0
+                ? "Downloads folder updated; there was no existing library to move."
+                : "Moved \(result.movedItemCount) \(itemLabel) to the new downloads folder."
+        } catch {
+            configMessage = error.localizedDescription
+            toastMessage = error.localizedDescription
+        }
+    }
+
+    func updateCredentials(
+        soulseekUsername: String,
+        soulseekPassword: String,
+        spotifyClientID: String,
+        spotifyClientSecret: String
+    ) {
+        guard settings.soulseekUsername != soulseekUsername
+                || settings.soulseekPassword != soulseekPassword
+                || settings.spotifyClientID != spotifyClientID
+                || settings.spotifyClientSecret != spotifyClientSecret else { return }
+        settings.soulseekUsername = soulseekUsername
+        settings.soulseekPassword = soulseekPassword
+        settings.spotifyClientID = spotifyClientID
+        settings.spotifyClientSecret = spotifyClientSecret
+        markConfigDirty()
     }
 
     func installSockseek() async {
@@ -750,22 +823,37 @@ extension RunCounts {
 struct PrototypePersistence {
     private let fileManager: FileManager
     private let url: URL
+    private let legacyURL: URL?
 
-    init(fileManager: FileManager = .default, url: URL? = nil) {
+    var storageURL: URL { url }
+
+    init(fileManager: FileManager = .default, url: URL? = nil, legacyURL: URL? = nil) {
         self.fileManager = fileManager
         if let url {
             self.url = url
+            self.legacyURL = legacyURL
         } else if let override = ProcessInfo.processInfo.environment["SEEKSYNC_STATE_PATH"], !override.isEmpty {
             self.url = URL(fileURLWithPath: NSString(string: override).expandingTildeInPath)
+            self.legacyURL = nil
         } else {
             self.url = fileManager.homeDirectoryForCurrentUser
+                .appendingPathComponent("Library/Application Support/SeekSync/state.json")
+            self.legacyURL = legacyURL ?? fileManager.homeDirectoryForCurrentUser
                 .appendingPathComponent("Library/Application Support/SeekSyncPrototype/prototype-state.json")
         }
     }
 
     func load() throws -> PrototypeState {
-        let data = try Data(contentsOf: url)
-        return try JSONDecoder().decode(PrototypeState.self, from: data)
+        if fileManager.fileExists(atPath: url.path) {
+            return try decode(from: url)
+        }
+        guard let legacyURL, fileManager.fileExists(atPath: legacyURL.path) else {
+            return try decode(from: url)
+        }
+
+        let state = try decode(from: legacyURL)
+        try? save(state)
+        return state
     }
 
     func save(_ state: PrototypeState) throws {
@@ -774,6 +862,11 @@ struct PrototypePersistence {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(state).write(to: url, options: .atomic)
         try fileManager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    private func decode(from url: URL) throws -> PrototypeState {
+        let data = try Data(contentsOf: url)
+        return try JSONDecoder().decode(PrototypeState.self, from: data)
     }
 }
 

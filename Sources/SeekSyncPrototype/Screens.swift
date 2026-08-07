@@ -612,55 +612,73 @@ struct SettingsScreen: View {
     @State private var showArmConfirmation = false
     @State private var showResetConfirmation = false
     @State private var showReloadConfirmation = false
+    @State private var showOutputDirectoryDecision = false
+    @State private var outputDirectoryCandidate: String?
+    @State private var credentialsEditing = false
+    @State private var revealSoulseekPassword = false
+    @State private var revealSpotifySecret = false
+    @State private var credentialDraft = CredentialDraft()
+    @State private var advancedExpanded = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                SectionHeader(eyebrow: "Configuration", title: "Settings", detail: "Global values round-trip the selected Sockseek config only when you press Save config.")
-
-                GroupBox("Dependency & config") {
-                    VStack(alignment: .leading, spacing: 12) {
-                        LabeledContent("Sockseek binary") {
-                            TextField("Path", text: binaryPathBinding)
-                                .multilineTextAlignment(.trailing)
-                        }
-                        LabeledContent("Config file") {
-                            TextField("Path", text: configBinding(\.configPath))
-                                .multilineTextAlignment(.trailing)
-                        }
-                        HStack {
-                            DependencyPill(state: model.dependencyState)
-                            Spacer()
-                            if !model.dependencyState.isReady {
-                                Button("Install Sockseek") {
-                                    Task { await model.installSockseek() }
-                                }
-                                .disabled(model.dependencyState == .installing)
-                            }
-                            Button("Reload Config") { requestReload() }
-                        }
-                        Text("If missing, SeekSync downloads the pinned official Sockseek 3.0.4 release, verifies its published SHA-256 digest, and installs it as a separate AGPL-3.0 tool. Source and license: github.com/fiso64/sockseek")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Text(model.configMessage)
-                            .font(.caption)
-                            .foregroundStyle(model.isConfigDirty ? .orange : .secondary)
-                    }
-                    .padding(4)
-                }
+                SectionHeader(
+                    eyebrow: "Preferences",
+                    title: "Settings",
+                    detail: "Choose where music goes, the quality SeekSync prefers, and the accounts it uses. Config changes save to Sockseek; automation and app data stay local."
+                )
 
                 GroupBox("Downloads") {
                     VStack(alignment: .leading, spacing: 12) {
-                        LabeledContent("Output directory") {
-                            TextField("Path", text: configBinding(\.outputDirectory))
-                                .multilineTextAlignment(.trailing)
+                        LabeledContent("Downloads folder") {
+                            HStack(spacing: 8) {
+                                Text(model.settings.outputDirectory)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                                    .textSelection(.enabled)
+                                Button {
+                                    chooseOutputDirectory()
+                                } label: {
+                                    Label("Choose…", systemImage: "folder")
+                                }
+                                .disabled(model.activeRun != nil)
+                            }
                         }
-                        LabeledContent("Preferred formats") {
-                            TextField("flac,wav", text: preferredFormatBinding)
-                                .multilineTextAlignment(.trailing)
+                        Divider()
+                        LabeledContent("Audio preference") {
+                            HStack(spacing: 8) {
+                                Picker("Format", selection: preferredFormatBinding) {
+                                    ForEach(AudioPreference.allCases) { preference in
+                                        Text(preference.label).tag(preference)
+                                    }
+                                }
+                                .labelsHidden()
+                                .frame(width: 150)
+
+                                if model.settings.preferredFormat.usesLosslessQualityLabel {
+                                    Text("Lossless")
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 110, alignment: .trailing)
+                                } else {
+                                    Picker("Minimum bitrate", selection: preferredBitrateBinding) {
+                                        ForEach(AudioBitratePreference.allCases) { bitrate in
+                                            Text(bitrate.label).tag(String(bitrate.rawValue))
+                                        }
+                                        if hasCustomPreferredBitrate {
+                                            Text("\(model.settings.preferredMinBitrateConfigValue) kbps (custom)")
+                                                .tag(model.settings.preferredMinBitrateConfigValue)
+                                        }
+                                    }
+                                    .labelsHidden()
+                                    .frame(width: 110)
+                                }
+                            }
                         }
-                        Text("Comma-separated values are an unordered soft preference (for example `flac,wav`); Sockseek may still accept another allowed format.")
+                        Text(qualityExplanation)
                             .font(.caption).foregroundStyle(.secondary)
+                        Divider()
                         Toggle("Allow YouTube fallback by default", isOn: configBinding(\.allowYouTubeFallback))
                         Text("If Soulseek has no suitable candidate, allow yt-dlp to try YouTube. This may increase coverage but does not guarantee the preferred format.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -668,18 +686,51 @@ struct SettingsScreen: View {
                         Text("Uses Sockseek's indexed-file check. A lossy file is revisited while FLAC is preferred; this is not a general audio-quality comparison.")
                             .font(.caption).foregroundStyle(.secondary)
                         Toggle("Write an M3U playlist", isOn: configBinding(\.writeM3UPlaylist))
-                        LabeledContent("Config profile", value: model.settings.profileName.isEmpty ? "Global settings" : model.settings.profileName)
                     }
                     .padding(4)
                 }
 
-                GroupBox("Accounts") {
+                GroupBox {
                     VStack(alignment: .leading, spacing: 12) {
-                        LabeledContent("Soulseek username") { TextField("Username", text: configBinding(\.soulseekUsername)) }
-                        LabeledContent("Soulseek password") { SecureField("Password", text: configBinding(\.soulseekPassword)) }
+                        Text("Soulseek")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        if credentialsEditing {
+                            LabeledContent("Username") {
+                                TextField("Username", text: $credentialDraft.soulseekUsername)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                            LabeledContent("Password") {
+                                CredentialSecretField(
+                                    placeholder: "Password",
+                                    text: $credentialDraft.soulseekPassword,
+                                    isRevealed: $revealSoulseekPassword
+                                )
+                            }
+                        } else {
+                            LabeledContent("Username", value: configuredText(model.settings.soulseekUsername))
+                            LabeledContent("Password", value: maskedText(model.settings.soulseekPassword))
+                        }
                         Divider()
-                        LabeledContent("Spotify client ID") { SecureField("Client ID", text: configBinding(\.spotifyClientID)) }
-                        LabeledContent("Spotify client secret") { SecureField("Client secret", text: configBinding(\.spotifyClientSecret)) }
+                        Text("Spotify")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        if credentialsEditing {
+                            LabeledContent("Client ID") {
+                                TextField("Client ID", text: $credentialDraft.spotifyClientID)
+                                    .multilineTextAlignment(.trailing)
+                            }
+                            LabeledContent("Client secret") {
+                                CredentialSecretField(
+                                    placeholder: "Client secret",
+                                    text: $credentialDraft.spotifyClientSecret,
+                                    isRevealed: $revealSpotifySecret
+                                )
+                            }
+                        } else {
+                            LabeledContent("Client ID", value: configuredText(model.settings.spotifyClientID, concealValue: true))
+                            LabeledContent("Client secret", value: maskedText(model.settings.spotifyClientSecret))
+                        }
                         HStack {
                             StatusPill(text: model.spotifyState.label, systemImage: "music.note", tone: spotifyTone)
                             Spacer()
@@ -691,15 +742,25 @@ struct SettingsScreen: View {
                                 .foregroundStyle(.red)
                                 .accessibilityLabel("Spotify error: \(detail)")
                         }
-                        Text("Tokens are read from the config and never displayed or copied into prototype state. Production should store app-owned secrets in Keychain.")
+                        Text("Access tokens stay hidden. Account changes are written to the Sockseek config only when you choose Save to Config below.")
                             .font(.caption).foregroundStyle(.secondary)
-                        Text("A distributed product that combines Spotify API metadata with download workflows needs a Spotify Developer Policy review. This prototype is local and personal-use only.")
-                            .font(.caption).foregroundStyle(.orange)
                     }
                     .padding(4)
+                } label: {
+                    HStack {
+                        Text("Accounts")
+                        Spacer()
+                        if credentialsEditing {
+                            Button("Cancel") { cancelCredentialEditing() }
+                            Button("Done") { finishCredentialEditing() }
+                                .buttonStyle(.borderedProminent)
+                        } else {
+                            Button("Edit") { beginCredentialEditing() }
+                        }
+                    }
                 }
 
-                GroupBox("Prototype scheduler") {
+                GroupBox("Automation") {
                     VStack(alignment: .leading, spacing: 12) {
                         HStack {
                             Stepper("Hour: \(model.settings.dailyHour)", value: $model.settings.dailyHour, in: 0...23)
@@ -717,20 +778,91 @@ struct SettingsScreen: View {
                              : "Disarmed: daily live jobs will not start automatically.")
                             .font(.caption)
                             .foregroundStyle(model.settings.isLiveSchedulingArmed ? .orange : .secondary)
-                        Button("Save Prototype Preferences") { model.persistPreferences() }
+                        Button("Save Automation") { model.persistPreferences() }
                     }
                     .padding(4)
                 }
 
-                HStack {
-                    Button("Reset Prototype Data", role: .destructive) { showResetConfirmation = true }
-                        .disabled(model.activeRun != nil)
-                    Spacer()
-                    Button("Reload") { requestReload() }
-                    Button("Save config") { model.saveConfig() }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(!model.isConfigDirty)
+                GroupBox("Sockseek") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            DependencyPill(state: model.dependencyState)
+                            Spacer()
+                            if model.dependencyState.isReady {
+                                Button("Check Again") { model.checkSockseek() }
+                            } else {
+                                Button("Install Sockseek") {
+                                    Task { await model.installSockseek() }
+                                }
+                                .disabled(model.dependencyState == .installing)
+                            }
+                        }
+                        Text("SeekSync uses a compatible Sockseek 3 installation when it finds one. If none is available, it downloads and verifies an official managed copy for you.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(4)
                 }
+
+                GroupBox("Storage & saving") {
+                    VStack(alignment: .leading, spacing: 12) {
+                        LabeledContent("Sockseek config") {
+                            pathText(model.settings.configPath)
+                        }
+                        Text("Downloads, quality, fallback, and account changes are written to this file only when you choose Save to Config. Reload from Config discards any unsaved config edits.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(model.configMessage)
+                            .font(.caption)
+                            .foregroundStyle(model.isConfigDirty ? .orange : .secondary)
+                        HStack {
+                            Button("Reload from Config") { requestReload() }
+                            Spacer()
+                            Button("Save to Config") { model.saveConfig() }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!model.isConfigDirty || credentialsEditing)
+                        }
+                        Divider()
+                        LabeledContent("Local app data") {
+                            pathText(model.localAppDataPath)
+                        }
+                        Text("SeekSync restores playlists, activity, automation, and interface state from this local file when it starts. Account credentials and access tokens are excluded from it.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(4)
+                }
+
+                DisclosureGroup(isExpanded: $advancedExpanded) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        LabeledContent("Sockseek executable") {
+                            HStack(spacing: 8) {
+                                pathText(model.settings.binaryPath)
+                                Button("Choose…") { chooseBinary() }
+                                Button("Automatic") { model.useAutomaticBinaryPath() }
+                            }
+                        }
+                        LabeledContent("Configuration file") {
+                            HStack(spacing: 8) {
+                                pathText(model.settings.configPath)
+                                Button("Choose…") { chooseConfigFile() }
+                                    .disabled(model.isConfigDirty)
+                            }
+                        }
+                        LabeledContent("Config profile", value: model.settings.profileName.isEmpty ? "Global settings" : model.settings.profileName)
+                        Text("These locations are detected automatically. Change them only when using a custom Sockseek installation or configuration.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 10)
+                } label: {
+                    Label("Advanced", systemImage: "gearshape.2")
+                        .font(.headline)
+                }
+                .padding(.horizontal, 8)
+
+                Button("Reset App Data", role: .destructive) { showResetConfirmation = true }
+                    .disabled(model.activeRun != nil)
             }
             .padding(22)
             .frame(maxWidth: 760)
@@ -761,10 +893,31 @@ struct SettingsScreen: View {
             isPresented: $showReloadConfirmation,
             titleVisibility: .visible
         ) {
-            Button("Discard and Reload", role: .destructive) { model.reloadConfig() }
+            Button("Discard and Reload Config", role: .destructive) { model.reloadConfig() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Reloading replaces the unsaved values currently shown in Settings.")
+            Text("Reloading from the Sockseek config replaces the unsaved config values currently shown in Settings. Locally saved automation and app data are not changed.")
+        }
+        .confirmationDialog(
+            "Use a new downloads folder?",
+            isPresented: $showOutputDirectoryDecision,
+            titleVisibility: .visible
+        ) {
+            if let candidate = outputDirectoryCandidate {
+                Button("Move Existing Library") {
+                    Task { await model.moveLibraryAndUpdateOutputDirectory(to: candidate) }
+                }
+                Button("Use New Folder Without Moving") {
+                    model.updateOutputDirectory(candidate)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Choose whether SeekSync should move the contents of your current downloads folder. Existing files in the new folder are never overwritten.")
+        }
+        .onDisappear {
+            revealSoulseekPassword = false
+            revealSpotifySecret = false
         }
     }
 
@@ -778,18 +931,31 @@ struct SettingsScreen: View {
         )
     }
 
-    private var preferredFormatBinding: Binding<String> {
+    private var preferredFormatBinding: Binding<AudioPreference> {
         Binding(
-            get: { model.settings.preferredFormatValue },
+            get: { model.settings.preferredFormat },
             set: {
-                model.settings.preferredFormatRaw = $0
+                model.settings.preferredFormat = $0
+                model.settings.preferredFormatRaw = $0.rawValue
                 model.markConfigDirty()
             }
         )
     }
 
-    private var binaryPathBinding: Binding<String> {
-        Binding(get: { model.settings.binaryPath }, set: { model.setBinaryPath($0) })
+    private var preferredBitrateBinding: Binding<String> {
+        Binding(
+            get: { model.settings.preferredMinBitrateConfigValue },
+            set: {
+                model.settings.preferredMinBitrateRaw = $0
+                model.settings.preferredMinBitrate = Int($0).flatMap(AudioBitratePreference.init(rawValue:))
+                model.markConfigDirty()
+            }
+        )
+    }
+
+    private var hasCustomPreferredBitrate: Bool {
+        guard let value = Int(model.settings.preferredMinBitrateConfigValue) else { return true }
+        return AudioBitratePreference(rawValue: value) == nil
     }
 
     private var liveArmBinding: Binding<Bool> {
@@ -814,6 +980,147 @@ struct SettingsScreen: View {
     private func requestReload() {
         if model.isConfigDirty { showReloadConfirmation = true }
         else { model.reloadConfig() }
+    }
+
+    private var qualityExplanation: String {
+        if model.settings.preferredFormat.usesLosslessQualityLabel {
+            return "FLAC and WAV are lossless, so bitrate is not used as the quality label. This remains a soft preference, not a strict requirement."
+        }
+        return "SeekSync asks Sockseek to prefer \(model.settings.preferredFormat.label.lowercased()) at or above \(model.settings.preferredMinBitrateLabel). Other suitable files may still be accepted."
+    }
+
+    private func pathText(_ value: String) -> some View {
+        Text(value)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .textSelection(.enabled)
+            .frame(maxWidth: 230, alignment: .trailing)
+    }
+
+    private func configuredText(_ value: String, concealValue: Bool = false) -> String {
+        guard !value.isEmpty else { return "Not configured" }
+        return concealValue ? "Configured" : value
+    }
+
+    private func maskedText(_ value: String) -> String {
+        value.isEmpty ? "Not configured" : "••••••••"
+    }
+
+    private func beginCredentialEditing() {
+        credentialDraft = CredentialDraft(settings: model.settings)
+        credentialsEditing = true
+    }
+
+    private func cancelCredentialEditing() {
+        credentialDraft = CredentialDraft()
+        credentialsEditing = false
+        revealSoulseekPassword = false
+        revealSpotifySecret = false
+    }
+
+    private func finishCredentialEditing() {
+        model.updateCredentials(
+            soulseekUsername: credentialDraft.soulseekUsername,
+            soulseekPassword: credentialDraft.soulseekPassword,
+            spotifyClientID: credentialDraft.spotifyClientID,
+            spotifyClientSecret: credentialDraft.spotifyClientSecret
+        )
+        credentialsEditing = false
+        revealSoulseekPassword = false
+        revealSpotifySecret = false
+    }
+
+    private func chooseOutputDirectory() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Downloads Folder"
+        panel.message = "Choose where SeekSync should save downloaded music."
+        panel.prompt = "Choose"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(
+            fileURLWithPath: NSString(string: model.settings.outputDirectory).expandingTildeInPath,
+            isDirectory: true
+        )
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            let candidate = url.standardizedFileURL.path
+            guard candidate != NSString(string: model.settings.outputDirectory).expandingTildeInPath else { return }
+            outputDirectoryCandidate = candidate
+            showOutputDirectoryDecision = true
+        }
+    }
+
+    private func chooseBinary() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Sockseek Executable"
+        panel.prompt = "Choose"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            model.setBinaryPath(url.standardizedFileURL.path)
+        }
+    }
+
+    private func chooseConfigFile() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Sockseek Configuration"
+        panel.prompt = "Choose"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = URL(fileURLWithPath: model.settings.configPath).deletingLastPathComponent()
+        panel.begin { response in
+            guard response == .OK, let url = panel.url else { return }
+            model.setConfigPath(url.standardizedFileURL.path)
+        }
+    }
+}
+
+private struct CredentialDraft {
+    var soulseekUsername = ""
+    var soulseekPassword = ""
+    var spotifyClientID = ""
+    var spotifyClientSecret = ""
+
+    init() {}
+
+    init(settings: ClientSettings) {
+        soulseekUsername = settings.soulseekUsername
+        soulseekPassword = settings.soulseekPassword
+        spotifyClientID = settings.spotifyClientID
+        spotifyClientSecret = settings.spotifyClientSecret
+    }
+}
+
+private struct CredentialSecretField: View {
+    let placeholder: String
+    @Binding var text: String
+    @Binding var isRevealed: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Group {
+                if isRevealed {
+                    TextField(placeholder, text: $text)
+                } else {
+                    SecureField(placeholder, text: $text)
+                }
+            }
+            .multilineTextAlignment(.trailing)
+            Button {
+                isRevealed.toggle()
+            } label: {
+                Image(systemName: isRevealed ? "eye.slash" : "eye")
+            }
+            .buttonStyle(.borderless)
+            .help(isRevealed ? "Hide \(placeholder.lowercased())" : "Show \(placeholder.lowercased())")
+            .accessibilityLabel(isRevealed ? "Hide \(placeholder)" : "Show \(placeholder)")
+        }
     }
 }
 

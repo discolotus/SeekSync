@@ -219,6 +219,10 @@ struct ConfigStore {
         settings.outputDirectory = output
         settings.preferredFormat = Self.audioPreference(from: preferredRaw)
         settings.preferredFormatRaw = preferredRaw
+        let preferredBitrateRaw = document.value(for: "pref-min-bitrate", section: section)
+            ?? document.value(for: "pref-min-bitrate")
+        settings.preferredMinBitrate = Self.audioBitratePreference(from: preferredBitrateRaw)
+        settings.preferredMinBitrateRaw = preferredBitrateRaw
         settings.allowYouTubeFallback = Self.boolValue(
             document.value(for: "yt-dlp", section: section) ?? document.value(for: "yt-dlp"),
             default: false
@@ -273,6 +277,7 @@ struct ConfigStore {
 
         document.set(settings.outputDirectory, for: outputKey, section: profile)
         document.set(settings.preferredFormatValue, for: "pref-format", section: profile)
+        document.set(settings.preferredMinBitrateConfigValue, for: "pref-min-bitrate", section: profile)
         document.set(settings.lookForPreferredQuality ? "true" : "false", for: "skip-check-pref-cond", section: profile)
         document.set(settings.writeM3UPlaylist ? "true" : "false", for: "write-playlist", section: profile)
         let youtubeSection = document.hasKey("yt-dlp", section: profile) ? profile : nil
@@ -329,5 +334,14 @@ struct ConfigStore {
             if values.contains(preference.rawValue) { return preference }
         }
         return .any
+    }
+
+    private static func audioBitratePreference(from raw: String?) -> AudioBitratePreference {
+        guard let raw,
+              let value = Int(raw.trimmingCharacters(in: .whitespacesAndNewlines)),
+              let preference = AudioBitratePreference(rawValue: value) else {
+            return .kbps200
+        }
+        return preference
     }
 }

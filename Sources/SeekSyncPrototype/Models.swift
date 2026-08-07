@@ -374,6 +374,22 @@ enum AudioPreference: String, CaseIterable, Identifiable, Codable {
         case .any: return "Any common audio"
         }
     }
+
+    var usesLosslessQualityLabel: Bool {
+        self == .flac || self == .wav
+    }
+}
+
+enum AudioBitratePreference: Int, CaseIterable, Identifiable, Codable {
+    case kbps128 = 128
+    case kbps160 = 160
+    case kbps192 = 192
+    case kbps200 = 200
+    case kbps256 = 256
+    case kbps320 = 320
+
+    var id: Int { rawValue }
+    var label: String { "\(rawValue) kbps" }
 }
 
 struct ClientSettings: Codable, Equatable {
@@ -382,6 +398,8 @@ struct ClientSettings: Codable, Equatable {
     var outputDirectory = "~/Music/downloads"
     var preferredFormat: AudioPreference = .flac
     var preferredFormatRaw: String?
+    var preferredMinBitrate: AudioBitratePreference? = .kbps200
+    var preferredMinBitrateRaw: String?
     var allowYouTubeFallback = true
     var lookForPreferredQuality = true
     var writeM3UPlaylist = true
@@ -404,6 +422,19 @@ struct ClientSettings: Codable, Equatable {
 
     var preferredFormatLabel: String {
         "\(preferredFormatValue.uppercased()) preferred"
+    }
+
+    var preferredMinBitrateValue: AudioBitratePreference {
+        preferredMinBitrate ?? .kbps200
+    }
+
+    var preferredMinBitrateConfigValue: String {
+        let raw = preferredMinBitrateRaw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return raw.isEmpty ? String(preferredMinBitrateValue.rawValue) : raw
+    }
+
+    var preferredMinBitrateLabel: String {
+        "\(preferredMinBitrateConfigValue) kbps"
     }
 
     var isLiveSchedulingArmed: Bool { liveSchedulingArmed == true }

@@ -7,7 +7,12 @@ Library + Inspector direction is now the sole application interface because
 playlist discovery is the natural starting point and it remains usable at the
 supported minimum window size.
 
-Prototype state is stored under `~/Library/Application Support/SeekSyncPrototype/prototype-state.json`. The real Sockseek config is only changed after the user explicitly presses **Save config**, and a sibling `.seeksync-backup` is created first.
+Application state is stored under `~/Library/Application Support/SeekSync/state.json`.
+On first launch after upgrading, SeekSync imports the previous
+`~/Library/Application Support/SeekSyncPrototype/prototype-state.json` file
+without deleting it. The real Sockseek config is only changed after the user
+explicitly presses **Save to Config**, and a sibling `.seeksync-backup` is
+created first.
 
 Before treating SeekSync as a fully productionized application, add
 production-grade OAuth, Keychain storage, launch-agent scheduling, durable job
