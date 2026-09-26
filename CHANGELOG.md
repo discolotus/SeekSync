@@ -3,6 +3,13 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] - 2026-09-26
+
+- Document Homebrew installation and updates, macOS first-launch trust
+  approval, manual download verification, and initial SeekSync setup.
+- Clarify that release bundles are already ad-hoc signed and do not require
+  users to sign the app manually.
+
 ## [0.4.1] - 2026-08-07
 
 - Add a Track Inventory section that gathers every previewed track across all

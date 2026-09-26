@@ -4,7 +4,95 @@ SeekSync is a native SwiftUI application for browsing Spotify playlists and driv
 
 On first launch, SeekSync uses an existing Sockseek 3 installation when available. If none is found, it downloads the pinned official macOS release (currently 3.0.4), verifies GitHub's published SHA-256 digest, and installs the executable under `~/Library/Application Support/SeekSyncPrototype/Tools/`. Sockseek remains a separate process and is licensed under AGPL-3.0; its license and corresponding source are available from [fiso64/sockseek](https://github.com/fiso64/sockseek/tree/v3.0.4).
 
-## Run it
+## Install with Homebrew (recommended)
+
+The published app requires an **Apple silicon Mac (M1 or later)** and
+**macOS 14 Sonoma or later**. Install [Homebrew](https://brew.sh/) first if
+you do not already have it, then run:
+
+```sh
+brew tap discolotus/tap
+brew install --cask discolotus/tap/seeksync
+open -a SeekSync
+```
+
+Homebrew installs `SeekSync.app` in `/Applications` and verifies the release
+archive against the cask's SHA-256 checksum. Xcode is not required to run the
+packaged app.
+
+### First launch: approve the app in macOS
+
+SeekSync releases are **ad-hoc signed but not Apple-notarized**. macOS may
+block the first launch because it cannot verify the developer. For a copy
+installed from the tap above or the official GitHub releases:
+
+1. Try opening SeekSync from Applications once, then dismiss the blocked-launch alert.
+2. Open **System Settings → Privacy & Security**.
+3. Scroll to the security section and click **Open Anyway** beside the SeekSync message.
+4. Authenticate if prompted, then confirm **Open**.
+
+See [Apple's instructions for opening an app from an unknown developer](https://support.apple.com/guide/mac-help/mh40616/mac).
+This approves this app for subsequent launches. **Manual `codesign` commands
+are not part of installation**: the release packaging already signs the app.
+Re-signing it yourself does not provide Apple notarization. There is no need
+to disable Gatekeeper globally.
+
+If macOS reports that the app is damaged, reinstall the official package:
+
+```sh
+brew reinstall --cask discolotus/tap/seeksync
+```
+
+### Updates
+
+Quit SeekSync after any active sync finishes, then run:
+
+```sh
+brew update
+brew upgrade --cask discolotus/tap/seeksync
+open -a SeekSync
+```
+
+The tap imports releases on a schedule, so a newly published GitHub release
+may take time to appear in Homebrew.
+
+## Install manually
+
+1. Open the [official releases page](https://github.com/discolotus/SeekSync/releases).
+   Releases may be marked as prereleases.
+2. Download the desired release's `SeekSync-<version>-arm64.zip` and matching
+   `.zip.sha256` file into the same folder.
+3. In Terminal, change to that folder and verify the archive (replace
+   `<version>` with the downloaded version):
+
+   ```sh
+   shasum -a 256 -c "SeekSync-<version>-arm64.zip.sha256"
+   ```
+
+4. Confirm the result says `OK`, unzip the archive, and drag `SeekSync.app`
+   into Applications. Quit an existing copy before replacing it.
+5. Open SeekSync and follow the first-launch approval steps above if needed.
+
+## First-run setup
+
+- Allow the automatic Sockseek dependency check to finish. SeekSync reuses a
+  compatible installation or installs its pinned version automatically.
+- In **Settings**, select your Sockseek config and music output folder.
+  SeekSync detects `~/.config/sockseek/sockseek.conf`, with
+  `~/.config/sldl/sldl.conf` as a legacy fallback. Configure your Soulseek
+  credentials for live syncs; Spotify library browsing also needs the Spotify
+  credentials supported by Sockseek. See the
+  [Sockseek configuration documentation](https://github.com/fiso64/sockseek#readme).
+  Use **Save config** to explicitly save settings changes.
+- Confirm the sidebar reports Sockseek ready. Load your Spotify library or
+  paste a playlist URL, then review and confirm the sync preview to start a run.
+- Daily syncs require explicitly arming live scheduling and keeping SeekSync
+  running. Quitting the app stops scheduling.
+
+## Build and run from source
+
+Source builds require Apple's Swift development tools (Xcode or Command Line
+Tools), with Swift 5.10 or later. From the repository folder:
 
 ```sh
 make run
