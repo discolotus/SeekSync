@@ -13,10 +13,11 @@ struct AppSidebar: View {
                 Section("Library") {
                     sidebarRow(.playlists, badge: nil)
                     sidebarRow(.inventory, badge: model.analyzedTrackCount)
-                    sidebarRow(.batchSync, badge: model.queuedSyncCount)
+                    sidebarRow(.batchSync, badge: nil)
                     sidebarRow(.syncPool, badge: model.plans.count)
                 }
                 Section("Runs") {
+                    sidebarRow(.queue, badge: model.queuedSyncCount)
                     sidebarRow(.activity, badge: (model.activeRun == nil ? 0 : 1) + model.queuedSyncCount)
                     sidebarRow(.attention, badge: model.attentionCount)
                 }
@@ -788,6 +789,7 @@ struct ActivityScreen: View {
 struct SyncQueueView: View {
     @EnvironmentObject private var model: AppModel
     var compact = false
+    var allowsReordering = false
 
     private var displayedItems: [SyncQueueItem] {
         compact ? Array(model.queuedSyncs.prefix(3)) : model.queuedSyncs
@@ -820,6 +822,18 @@ struct SyncQueueView: View {
                             .foregroundStyle(.secondary)
                     }
                     Spacer()
+                    if allowsReordering {
+                        Button { model.moveQueuedSync(item.id, by: -1) } label: {
+                            Image(systemName: "arrow.up")
+                        }
+                        .disabled(index == 0)
+                        .accessibilityLabel("Move \(item.playlist.name) earlier")
+                        Button { model.moveQueuedSync(item.id, by: 1) } label: {
+                            Image(systemName: "arrow.down")
+                        }
+                        .disabled(index == model.queuedSyncCount - 1)
+                        .accessibilityLabel("Move \(item.playlist.name) later")
+                    }
                     Button {
                         model.removeQueuedSync(item.id)
                     } label: {
@@ -832,7 +846,7 @@ struct SyncQueueView: View {
                 }
             }
             if compact, model.queuedSyncCount > displayedItems.count {
-                Text("+\(model.queuedSyncCount - displayedItems.count) more in Activity")
+                Button("View all \(model.queuedSyncCount) queued playlists") { model.selectedSection = .queue }
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .trailing)
@@ -1110,6 +1124,30 @@ struct SettingsScreen: View {
                             Label("Ready for read-only playlist previews", systemImage: "checkmark.circle.fill")
                                 .font(.caption)
                                 .foregroundStyle(.green)
+                        }
+
+                        Divider()
+                        HStack {
+                            Button("Reindex Library", systemImage: "arrow.clockwise") {
+                                model.reindexLibrary()
+                            }
+                            .disabled(!model.canReindexLibrary)
+                            if model.isReindexingLibrary {
+                                Button("Cancel") { model.cancelLibraryReindex() }
+                            }
+                        }
+                        Text("Refresh local matches for all \(model.libraryReindexPlaylists.count) playlists, one at a time. Large libraries may take a while. This reads playlist metadata but does not download music.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        if model.isReindexingLibrary {
+                            ProgressView(value: Double(model.libraryReindexCompleted), total: Double(max(1, model.libraryReindexTotal)))
+                            if let id = model.libraryReindexPlaylistID,
+                               let stage = model.libraryAnalysisMessages[id] {
+                                Text(stage).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        if let message = model.libraryReindexMessage {
+                            Text(message).font(.caption).textSelection(.enabled)
                         }
 
                         Text("The preview uses Sockseek’s tag matcher and preferred conditions without contacting Soulseek or writing to your music folders.")

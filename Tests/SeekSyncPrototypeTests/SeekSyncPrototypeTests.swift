@@ -1521,6 +1521,15 @@ final class LibraryReuseTests: XCTestCase {
             "Expected the cached index to be reported to the user: \(reusedStages)"
         )
 
+        var forcedStages: [String] = []
+        let reindexed = try await analyzer.analyze(playlist: playlist, settings: settings, forceReindex: true) { stage in
+            forcedStages.append(stage)
+        }
+        XCTAssertFalse(forcedStages.contains { $0.localizedCaseInsensitiveContains("cached library index") })
+        XCTAssertEqual(reindexed.tracks.map(\.disposition), analysis.tracks.map(\.disposition))
+        XCTAssertEqual(reindexed.tracks[3].localPath, output.appendingPathComponent("already-downloaded.mp3").path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: stableIndex.path))
+
         let advancedConditions = LibraryReuseConditionPolicy(
             arguments: ["--pref-max-bitrate", "200"]
         )
@@ -1783,6 +1792,29 @@ final class SyncQueueTests: XCTestCase {
         XCTAssertFalse(confirmedCommand.contains("changed-after-confirmation"))
         XCTAssertTrue(model.queuedSyncs.isEmpty)
 
+        model.cancelActiveRun()
+    }
+
+    func testReorderingChangesNextJobWithoutChangingConfirmedCommands() async throws {
+        let model = AppModel()
+        for playlist in Playlist.samples.prefix(3) {
+            model.showSyncPreview(for: playlist)
+            model.confirmPendingSync()
+        }
+        let original = model.queuedSyncs
+        XCTAssertEqual(original.count, 2)
+        guard original.count == 2 else { return }
+        model.moveQueuedSync(original[1].id, by: -1)
+        XCTAssertEqual(model.queuedSyncs, [original[1], original[0]])
+        model.moveQueuedSync(original[1].id, by: -1)
+        XCTAssertEqual(model.queuedSyncs, [original[1], original[0]])
+        model.cancelActiveRun()
+        for _ in 0..<50 where model.activeRun?.playlistID != original[1].playlist.id {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertEqual(model.activeRun?.playlistID, original[1].playlist.id)
+        XCTAssertEqual(model.activeRun?.commandPreview, original[1].command.displayString)
+        model.removeQueuedSync(original[0].id)
         model.cancelActiveRun()
     }
 
@@ -2716,5 +2748,67 @@ final class RekordboxWiringTests: XCTestCase {
         XCTAssertEqual(sources.map(\.name), [synced.name])
         let expected = SockseekCommandBuilder().indexPath(for: synced, outputDirectory: "~/Music/downloads")
         XCTAssertEqual(sources.first?.indexPath, expected)
+    }
+}
+
+@MainActor
+final class GlobalLibraryReindexTests: XCTestCase {
+    private func makeModel(root: URL, delay: Bool) throws -> AppModel {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let binary = root.appendingPathComponent("sockseek")
+        try ("#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 3.0.5; exit 0; fi\n" + (delay ? "sleep 2\n" : "") + "echo 'Test metadata unavailable'\nexit 1\n")
+            .write(to: binary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
+        let model = AppModel()
+        model.liveSpotifyPlaylists = []
+        model.spotifyCatalogLoaded = true
+        model.importedPlaylists = Array(Playlist.samples.prefix(2)).map {
+            var playlist = $0
+            playlist.isFixture = false
+            return playlist
+        }
+        model.settings.libraryReuseEnabled = true
+        model.settings.libraryDirectory = root.path
+        model.settings.binaryPath = binary.path
+        model.dependencyState = .ready(version: "3.0.5")
+        return model
+    }
+
+    func testGlobalReindexContinuesAfterFailuresWithoutQueueingDownloads() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root, delay: false)
+        XCTAssertEqual(model.libraryReindexPlaylists.count, 2)
+        model.reindexLibrary()
+        model.reindexLibrary() // A second click must not launch another batch.
+        for _ in 0..<250 where model.isReindexingLibrary {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertFalse(model.isReindexingLibrary)
+        XCTAssertEqual(model.libraryReindexCompleted, 2)
+        XCTAssertEqual(model.libraryReindexMessage, "Reindex finished: 0 refreshed, 2 failed.")
+        XCTAssertEqual(model.libraryAnalysisMessages.count, 2)
+        XCTAssertTrue(model.queuedSyncs.isEmpty)
+        XCTAssertNil(model.activeRun)
+    }
+
+    func testCancellationStopsBeforeTheNextPlaylist() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root, delay: true)
+        model.reindexLibrary()
+        for _ in 0..<50 where model.libraryAnalysisPlaylistIDs.isEmpty {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        model.cancelLibraryReindex()
+        for _ in 0..<250 where model.isReindexingLibrary {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertFalse(model.isReindexingLibrary)
+        XCTAssertEqual(model.libraryReindexCompleted, 0)
+        XCTAssertTrue(model.libraryAnalysisPlaylistIDs.isEmpty)
+        XCTAssertTrue(model.libraryReindexMessage?.contains("cancelled") == true)
+        XCTAssertLessThanOrEqual(model.libraryAnalysisMessages.count, 1)
+        XCTAssertTrue(model.queuedSyncs.isEmpty)
     }
 }

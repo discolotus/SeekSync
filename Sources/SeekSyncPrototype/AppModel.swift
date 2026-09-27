@@ -61,7 +61,69 @@ final class AppModel: ObservableObject {
     private var schedulerCancellable: AnyCancellable?
     private var activeRunTask: Task<Void, Never>?
     private var liveRunProgress: [UUID: SockseekProgressTracker] = [:]
-    private var libraryAnalysisTasks: [String: Task<Void, Never>] = [:]
+    private var libraryAnalysisTasks: [String: Task<Bool, Never>] = [:]
+    private var libraryReindexTask: Task<Void, Never>?
+    @Published private(set) var isReindexingLibrary = false
+    @Published private(set) var libraryReindexMessage: String?
+    @Published private(set) var libraryReindexCompleted = 0
+    @Published private(set) var libraryReindexTotal = 0
+    @Published private(set) var libraryReindexPlaylistID: String?
+
+    var libraryReindexPlaylists: [Playlist] {
+        allPlaylists.filter { $0.executionKind == .sockseek }
+    }
+
+    var canReindexLibrary: Bool {
+        settings.isLibraryReuseEnabled && dependencyState.isReady
+            && libraryReuseBlocker == nil && !libraryReindexPlaylists.isEmpty
+            && libraryAnalysisTasks.isEmpty && !isReindexingLibrary
+    }
+
+    func reindexLibrary() {
+        guard canReindexLibrary else { return }
+        let playlists = libraryReindexPlaylists
+        let originalSettings = settings
+        let originalConditions = libraryReuseConditionPolicy
+        isReindexingLibrary = true
+        libraryReindexCompleted = 0
+        libraryReindexTotal = playlists.count
+        libraryReindexTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                self.isReindexingLibrary = false
+                self.libraryReindexPlaylistID = nil
+                self.libraryReindexTask = nil
+            }
+            var failed = 0
+            for playlist in playlists {
+                guard !Task.isCancelled else { break }
+                guard self.settings == originalSettings,
+                      self.libraryReuseConditionPolicy == originalConditions else {
+                    self.libraryReindexMessage = "Reindex stopped because settings changed. Refreshed inventories were kept."
+                    return
+                }
+                self.libraryReindexPlaylistID = playlist.id
+                self.libraryReindexMessage = "Checking \(self.libraryReindexCompleted + 1) of \(playlists.count): \(playlist.name)"
+                guard let task = self.startLibraryAnalysis(for: playlist, forceReindex: true) else {
+                    failed += 1
+                    self.libraryReindexCompleted += 1
+                    continue
+                }
+                let succeeded = await task.value
+                guard !Task.isCancelled else { break }
+                if !succeeded { failed += 1 }
+                self.libraryReindexCompleted += 1
+            }
+            self.libraryReindexMessage = Task.isCancelled
+                ? "Reindex cancelled after \(self.libraryReindexCompleted) of \(playlists.count) playlists. Refreshed inventories were kept."
+                : "Reindex finished: \(playlists.count - failed) refreshed, \(failed) failed."
+        }
+    }
+
+    func cancelLibraryReindex() {
+        libraryReindexTask?.cancel()
+        if let id = libraryReindexPlaylistID { libraryAnalysisTasks[id]?.cancel() }
+    }
 
     init() {
         let restored = try? persistence.load()
@@ -130,6 +192,7 @@ final class AppModel: ObservableObject {
 
     deinit {
         activeRunTask?.cancel()
+        libraryReindexTask?.cancel()
         libraryAnalysisTasks.values.forEach { $0.cancel() }
     }
 
@@ -312,6 +375,13 @@ final class AppModel: ObservableObject {
 
     func isQueued(_ playlistID: String) -> Bool {
         syncQueue.contains { $0.playlist.id == playlistID }
+    }
+
+    func moveQueuedSync(_ id: UUID, by offset: Int) {
+        guard let index = syncQueue.firstIndex(where: { $0.id == id }),
+              offset == -1 || offset == 1,
+              syncQueue.indices.contains(index + offset) else { return }
+        syncQueue.swapAt(index, index + offset)
     }
 
     func removeQueuedSync(_ id: UUID) {
@@ -661,24 +731,30 @@ final class AppModel: ObservableObject {
     }
 
     func analyzeLibraryReuse(for requestedPlaylist: Playlist) {
+        guard !isReindexingLibrary else { return }
+        startLibraryAnalysis(for: requestedPlaylist)
+    }
+
+    @discardableResult
+    private func startLibraryAnalysis(for requestedPlaylist: Playlist, forceReindex: Bool = false) -> Task<Bool, Never>? {
         let playlist = allPlaylists.first(where: { $0.id == requestedPlaylist.id }) ?? requestedPlaylist
         guard settings.isLibraryReuseEnabled else {
             toastMessage = "Enable existing-library references in Settings before running a preview."
-            return
+            return nil
         }
         guard playlist.executionKind == .sockseek else {
             toastMessage = "Library reuse previews are available for real Spotify playlists."
-            return
+            return nil
         }
         guard dependencyState.isReady else {
             toastMessage = "Sockseek 3 must be ready before analyzing a playlist."
-            return
+            return nil
         }
         if let libraryReuseBlocker {
             toastMessage = libraryReuseBlocker
-            return
+            return nil
         }
-        guard libraryAnalysisTasks[playlist.id] == nil else { return }
+        guard libraryAnalysisTasks[playlist.id] == nil else { return nil }
 
         let settingsSnapshot = settings
         let conditionPolicySnapshot = libraryReuseConditionPolicy
@@ -686,12 +762,13 @@ final class AppModel: ObservableObject {
         libraryAnalysisMessages[playlist.id] = "Preparing a read-only library preview…"
         let analyzer = LibraryReuseAnalyzer()
         let task = Task { [weak self] in
-            guard let self else { return }
+            guard let self else { return false }
             do {
                 let analysis = try await analyzer.analyze(
                     playlist: playlist,
                     settings: settingsSnapshot,
-                    conditionPolicy: conditionPolicySnapshot
+                    conditionPolicy: conditionPolicySnapshot,
+                    forceReindex: forceReindex
                 ) { [weak self] stage in
                     await MainActor.run {
                         self?.libraryAnalysisMessages[playlist.id] = stage
@@ -703,7 +780,7 @@ final class AppModel: ObservableObject {
                     self.libraryAnalysisMessages[playlist.id] = "The playlist or reuse settings changed while the preview was running. Analyze again for a current inventory."
                     self.libraryAnalysisPlaylistIDs.remove(playlist.id)
                     self.libraryAnalysisTasks.removeValue(forKey: playlist.id)
-                    return
+                    return false
                 }
                 self.libraryAnalyses[playlist.id] = analysis
                 self.applyLibraryAnalysisSummary(analysis)
@@ -711,6 +788,7 @@ final class AppModel: ObservableObject {
                 self.libraryAnalysisPlaylistIDs.remove(playlist.id)
                 self.libraryAnalysisTasks.removeValue(forKey: playlist.id)
                 self.persist()
+                return true
             } catch is CancellationError {
                 self.libraryAnalysisMessages[playlist.id] = "Library preview cancelled."
                 self.libraryAnalysisPlaylistIDs.remove(playlist.id)
@@ -720,8 +798,10 @@ final class AppModel: ObservableObject {
                 self.libraryAnalysisPlaylistIDs.remove(playlist.id)
                 self.libraryAnalysisTasks.removeValue(forKey: playlist.id)
             }
+            return false
         }
         libraryAnalysisTasks[playlist.id] = task
+        return task
     }
 
     func cancelActiveRun() {

@@ -18,7 +18,7 @@ struct LibraryInspectorVariant: View {
         if mode.usesOverlayInspector {
             navigation(inlineInspectorWidth: nil)
                 .overlay(alignment: .trailing) {
-                    if inspectorPresented && model.selectedSection != .batchSync {
+                    if inspectorPresented && model.selectedSection != .batchSync && model.selectedSection != .queue {
                         compactInspector(availableWidth: availableWidth)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                     }
@@ -26,7 +26,7 @@ struct LibraryInspectorVariant: View {
                 .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: inspectorPresented)
         } else {
             navigation(
-                inlineInspectorWidth: inspectorPresented && model.selectedSection != .batchSync
+                inlineInspectorWidth: inspectorPresented && model.selectedSection != .batchSync && model.selectedSection != .queue
                     ? (mode == .wide ? 380 : 340)
                     : nil
             )
@@ -109,6 +109,8 @@ struct LibraryInspectorVariant: View {
             BatchSyncScreen()
         case .syncPool:
             SyncPoolScreen()
+        case .queue:
+            SyncQueueScreen()
         case .activity:
             ActivityScreen()
         case .attention:
@@ -161,7 +163,7 @@ struct LibraryInspectorVariant: View {
             } else {
                 EmptyStateView(systemImage: "clock", title: "No runs yet", detail: "Activity details will appear here.")
             }
-        case .attention, .settings:
+        case .queue, .attention, .settings:
             PolicyExplainer()
         }
     }

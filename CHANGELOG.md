@@ -3,6 +3,14 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-09-26
+
+- Add a global Reindex Library action in Settings with sequential playlist
+  analysis, progress, cancellation, and forced refresh of cached local matches.
+- Add a dedicated Sync Queue screen with the active run, all waiting playlists
+  in execution order, and controls to reorder or remove waiting jobs.
+- Distinguish queued jobs from daily schedules and explain queue lifetime.
+
 ## [0.4.2] - 2026-09-26
 
 - Document Homebrew installation and updates, macOS first-launch trust

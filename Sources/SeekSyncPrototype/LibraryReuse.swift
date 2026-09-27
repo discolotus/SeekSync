@@ -463,6 +463,7 @@ struct LibraryReuseAnalyzer {
         playlist: Playlist,
         settings: ClientSettings,
         conditionPolicy: LibraryReuseConditionPolicy = LibraryReuseConditionPolicy(arguments: []),
+        forceReindex: Bool = false,
         onStage: ((String) async -> Void)? = nil
     ) async throws -> PlaylistLibraryAnalysis {
         let libraryPath = NSString(string: settings.libraryDirectoryPath).expandingTildeInPath
@@ -528,12 +529,17 @@ struct LibraryReuseAnalyzer {
             conditionFingerprint: conditionPolicy.fingerprint
         )
         let libraryStamp = LibraryScanStamp.make(libraryPath: libraryPath, fileManager: fileManager)
-        let cached = libraryStamp.flatMap { cache.load(key: cacheKey, stamp: $0) }
+        let cached = forceReindex ? nil : libraryStamp.flatMap { cache.load(key: cacheKey, stamp: $0) }
         if cached != nil {
             await onStage?("Reusing the cached library index from the last preview…")
         }
-        let gatedSeed = seedEntries(stable: stableEntries, cached: cached?.gated ?? [])
-        let ungatedSeed = seedEntries(stable: stableEntries, cached: cached?.ungated ?? [])
+        // A forced scan must rediscover external-library references. Preserve
+        // downloaded output entries and the on-disk stable index itself.
+        let seedStableEntries = forceReindex ? stableEntries.filter {
+            $0.path.map { contains($0, in: settings.outputDirectory) } == true
+        } : stableEntries
+        let gatedSeed = seedEntries(stable: seedStableEntries, cached: cached?.gated ?? [])
+        let ungatedSeed = seedEntries(stable: seedStableEntries, cached: cached?.ungated ?? [])
         if !gatedSeed.isEmpty {
             try writeIndexSnapshot(gatedSeed, to: gatedIndex)
         }
