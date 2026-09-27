@@ -52,7 +52,7 @@ struct RootPrototypeView: View {
                 }
                 .help(inspectorPresented ? "Hide playlist inspector" : "Show playlist inspector")
                 .accessibilityLabel(inspectorPresented ? "Hide playlist inspector" : "Show playlist inspector")
-                .disabled(model.selectedSection == .batchSync)
+                .disabled(model.selectedSection == .batchSync || model.selectedSection == .queue)
             }
         }
         .sheet(isPresented: $showAddPlaylist) {

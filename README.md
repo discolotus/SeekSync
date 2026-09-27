@@ -89,6 +89,24 @@ may take time to appear in Homebrew.
 - Daily syncs require explicitly arming live scheduling and keeping SeekSync
   running. Quitting the app stops scheduling.
 
+## Refresh library matches and manage the queue
+
+In **Settings → Existing music library**, enable reuse and choose your music
+folder, then click **Reindex Library**. SeekSync refreshes matches for every
+loaded real playlist, one at a time, bypassing cached preview matches. Progress
+shows the current playlist; **Cancel** stops the batch and keeps completed
+inventories. This reads playlist metadata and local files without downloading
+music. Large playlist collections can take time. Files still need matching tags
+and must meet the preferred quality conditions to qualify for reuse.
+
+Open **Sync Queue** in the sidebar to see the current run and every waiting
+playlist in execution order. Use the arrows to reorder waiting jobs or remove
+an individual job. Cancelling the active sync starts the next queued job.
+Waiting jobs last for the current app session; quitting clears the queue.
+**Sync Pool** manages daily schedules separately; they also appear under
+Scheduled playlists in Sync Queue. Due jobs start when the queue is idle,
+while scheduling is armed and the app is running.
+
 ## Build and run from source
 
 Source builds require Apple's Swift development tools (Xcode or Command Line
