@@ -107,6 +107,20 @@ Waiting jobs last for the current app session; quitting clears the queue.
 Scheduled playlists in Sync Queue. Due jobs start when the queue is idle,
 while scheduling is armed and the app is running.
 
+## Spotify playlist access errors
+
+A playlist that opens in Spotify may still be unavailable through its Web API.
+Spotify restricts some algorithmic and Spotify-owned playlists for development
+apps ([Spotify's API announcement](https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api)).
+An HTTP 404 can also mean the URL is unavailable or the connected account lacks
+access; it does not by itself prove the playlist was deleted.
+
+Check the URL and account in Spotify. For a personalized playlist such as a
+Top Songs collection, try copying its tracks into a regular playlist you own,
+then import the new playlist URL. Use **Analyze Library** again. A failed
+playlist read blocks that preview's **Start Sync** until metadata can be read;
+changing YouTube fallback or rebuilding the local index cannot fix API access.
+
 ## Build and run from source
 
 Source builds require Apple's Swift development tools (Xcode or Command Line

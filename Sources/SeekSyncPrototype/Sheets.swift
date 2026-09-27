@@ -86,7 +86,7 @@ struct SyncPreviewSheet: View {
                         PlaylistArtwork(playlist: pending.playlist, size: 68)
                         VStack(alignment: .leading, spacing: 5) {
                             Label(
-                                isLiveSync ? "READY TO SYNC" : "DEMO PREVIEW",
+                                isLiveSync ? (startBlocker == nil ? "READY TO SYNC" : "SYNC NEEDS ATTENTION") : "DEMO PREVIEW",
                                 systemImage: isLiveSync ? "arrow.triangle.2.circlepath" : "eye"
                             )
                             .font(.system(size: 10, weight: .bold))
@@ -305,6 +305,12 @@ struct SyncPreviewSheet: View {
     }
 
     private var startBlocker: String? {
+        if model.isAnalyzingLibrary(for: pending.playlist.id) {
+            return "Wait for the library analysis to finish before starting this sync."
+        }
+        if let blocker = model.playlistReadBlocker(for: pending.playlist) {
+            return blocker
+        }
         if model.activeRun?.playlistID == pending.playlist.id {
             return "This playlist is already syncing."
         }

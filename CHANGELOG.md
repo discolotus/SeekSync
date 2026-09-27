@@ -3,6 +3,13 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.1] - 2026-09-27
+
+- Explain Spotify playlist HTTP 404 failures with account, URL, and personalized
+  playlist recovery guidance instead of exposing only backend diagnostics.
+- Keep single-playlist sync confirmation blocked after a failed metadata read
+  or while analysis is running; clear the access error when a retry reads tracks.
+
 ## [0.5.0] - 2026-09-26
 
 - Add a global Reindex Library action in Settings with sequential playlist

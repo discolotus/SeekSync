@@ -2792,6 +2792,40 @@ final class GlobalLibraryReindexTests: XCTestCase {
         XCTAssertNil(model.activeRun)
     }
 
+    func testFailedPlaylistReadBlocksConfirmationAndSuccessfulReadClearsIt() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = try makeModel(root: root, delay: false)
+        let playlist = try XCTUnwrap(model.libraryReindexPlaylists.first)
+        model.analyzeLibraryReuse(for: playlist)
+        for _ in 0..<250 where model.isAnalyzingLibrary(for: playlist.id) {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertNotNil(model.playlistReadBlocker(for: playlist))
+        model.showSyncPreview(for: playlist)
+        model.confirmPendingSync()
+        XCTAssertNotNil(model.pendingSync)
+        XCTAssertNil(model.activeRun)
+        XCTAssertTrue(model.queuedSyncs.isEmpty)
+
+        // Restore metadata access. The fake backend still cannot scan local
+        // files, but that must not leave a stale playlist-access blocker.
+        let binary = URL(fileURLWithPath: model.settings.binaryPath)
+        try """
+        #!/bin/sh
+        if [ "$1" = "--version" ]; then echo 3.0.5; exit 0; fi
+        printf '1 jobs:\n  Song:\n    Artist: Test Artist\n    Title: Test Track\n'
+        exit 0
+        """.write(to: binary, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: binary.path)
+        model.analyzeLibraryReuse(for: playlist)
+        for _ in 0..<250 where model.isAnalyzingLibrary(for: playlist.id) {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertNil(model.playlistReadBlocker(for: playlist))
+        XCTAssertNil(model.activeRun)
+    }
+
     func testCancellationStopsBeforeTheNextPlaylist() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
@@ -2810,5 +2844,23 @@ final class GlobalLibraryReindexTests: XCTestCase {
         XCTAssertTrue(model.libraryReindexMessage?.contains("cancelled") == true)
         XCTAssertLessThanOrEqual(model.libraryAnalysisMessages.count, 1)
         XCTAssertTrue(model.queuedSyncs.isEmpty)
+    }
+}
+
+final class PlaylistAccessErrorTests: XCTestCase {
+    func testSpotify404ExplainsAccessAndRecoveryWithoutClaimingDeletion() {
+        let error = LibraryReuseAnalysisError.playlistExtractionFailed(
+            "ExtractJob: Spotify playlist request after user authorization failed: HTTP 404 NotFound"
+        )
+        let message = error.localizedDescription
+        XCTAssertTrue(message.contains("Spotify could not provide this playlist"))
+        XCTAssertTrue(message.contains("playlist you own"))
+        XCTAssertTrue(message.contains("404"))
+        XCTAssertFalse(message.contains("was deleted"))
+    }
+
+    func testNonSpotify404DoesNotSuggestSpotifyRecovery() {
+        let error = LibraryReuseAnalysisError.playlistExtractionFailed("Other provider: HTTP 404 NotFound")
+        XCTAssertFalse(error.localizedDescription.contains("playlist you own"))
     }
 }
