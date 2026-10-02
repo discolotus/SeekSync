@@ -2,7 +2,7 @@ import AudioToolbox
 import CryptoKit
 import Foundation
 
-struct LibraryReuseConditionPolicy: Hashable {
+struct LibraryReuseConditionPolicy: Hashable, Codable {
     var arguments: [String]
 
     var fingerprint: String {
@@ -53,6 +53,18 @@ struct AudioFileQuality: Codable, Hashable {
     var sampleRateHz: Int?
     var bitDepth: Int?
     var durationSeconds: Double?
+
+    func missesTarget(format preferredFormat: String, minimumBitrate: Int?) -> Bool {
+        let accepted = preferredFormat.lowercased().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        let actual = format.lowercased()
+        let matchesFormat = accepted.contains(actual)
+            || (accepted.contains("m4a") && ["aac", "alac"].contains(actual))
+        if !accepted.isEmpty && !matchesFormat { return true }
+        if let minimumBitrate, let bitrateKbps, bitrateKbps > 0 {
+            return bitrateKbps < minimumBitrate
+        }
+        return false
+    }
 
     var displayLabel: String {
         var parts = [format.uppercased()]
@@ -107,6 +119,16 @@ struct PlaylistLibraryAnalysis: Codable, Hashable {
             return "\(format) preferred"
         }
         return "\(format) · at least \(minimumBitrateKbps) kbps"
+    }
+
+    func filteredTracks(query: String, disposition: PlaylistTrackDisposition?) -> [PlaylistTrackRecord] {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        return tracks.filter { track in
+            let statusMatches = disposition == nil || track.disposition == disposition
+                || (disposition == .unavailable && track.disposition == .unknown)
+            let text = [track.seed.title, track.seed.artist, track.seed.album ?? "", track.localPath ?? ""].joined(separator: " ")
+            return statusMatches && (term.isEmpty || text.localizedCaseInsensitiveContains(term))
+        }
     }
 
     var referenceCount: Int {
@@ -699,16 +721,9 @@ struct LibraryReuseAnalyzer {
         let minimumBitrate = command.value(after: "--pref-min-bitrate").flatMap(Int.init)
             ?? previousAnalysis?.minimumBitrateKbps
         let currentLibraryPath = standardized(libraryPath)
-        let reusablePrevious = previousAnalysis.flatMap { analysis -> PlaylistLibraryAnalysis? in
-            guard standardized(analysis.sourceLibraryPath) == currentLibraryPath,
-                  analysis.preferredFormat.caseInsensitiveCompare(preferredFormat) == .orderedSame,
-                  analysis.minimumBitrateKbps == minimumBitrate else { return nil }
-            guard analysis.conditionFingerprint == conditionPolicy.fingerprint
-                    || (analysis.conditionFingerprint == nil && conditionPolicy.arguments.isEmpty) else {
-                return nil
-            }
-            return analysis
-        }
+        // Target changes must not erase playable fallbacks. Each previous path
+        // is validated below against the current roots and current track identity.
+        let reusablePrevious = previousAnalysis
 
         let seeds: [PlaylistTrackSeed]
         // The stable index can retain historical or duplicate rows across runs.
@@ -752,6 +767,11 @@ struct LibraryReuseAnalyzer {
             }
 
             if let path = entry.path, fileManager.fileExists(atPath: path) {
+                if entry.isAvailable,
+                   qualities[path]?.missesTarget(format: preferredFormat, minimumBitrate: minimumBitrate) == true {
+                    return PlaylistTrackRecord(seed: seed, disposition: .libraryBelowThreshold,
+                                               localPath: path, quality: qualities[path])
+                }
                 if entry.state == 1 {
                     return PlaylistTrackRecord(
                         seed: seed,
@@ -800,7 +820,7 @@ struct LibraryReuseAnalyzer {
         previous: PlaylistTrackRecord?,
         disposition: PlaylistTrackDisposition
     ) -> PlaylistTrackRecord {
-        if let previous, previous.disposition == .libraryBelowThreshold {
+        if let previous, previous.localPath != nil {
             return PlaylistTrackRecord(
                 seed: seed,
                 disposition: .libraryBelowThreshold,
@@ -1071,7 +1091,7 @@ private struct PreviousRecordLookup {
     }
 }
 
-private extension SLDLCommand {
+extension SLDLCommand {
     func value(after option: String) -> String? {
         guard let index = arguments.lastIndex(of: option) else { return nil }
         let valueIndex = arguments.index(after: index)

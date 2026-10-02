@@ -101,8 +101,10 @@ and must meet the preferred quality conditions to qualify for reuse.
 
 Open **Sync Queue** in the sidebar to see the current run and every waiting
 playlist in execution order. Use the arrows to reorder waiting jobs or remove
-an individual job. Cancelling the active sync starts the next queued job.
-Waiting jobs last for the current app session; quitting clears the queue.
+an individual job. Cancelling the active sync starts the next queued job unless the queue is paused.
+Pause lets the current job finish and holds waiting jobs and daily schedules.
+Waiting jobs retain their order and confirmed commands across restarts. A restored
+queue starts paused; choose Resume queue when ready.
 **Sync Pool** manages daily schedules separately; they also appear under
 Scheduled playlists in Sync Queue. Due jobs start when the queue is idle,
 while scheduling is armed and the app is running.
@@ -215,3 +217,15 @@ After merge, CI tests and packages the application, creates the corresponding
 tag as an implementation detail, and publishes the ZIP, SHA-256 checksum, and
 generated cask as a GitHub prerelease. The central Homebrew tap imports that
 cask automatically on its next scheduled update.
+
+### Playable files and track details
+
+Right-click a playlist with a saved inventory and choose **View Tracks and Quality…**
+to search its titles, artists, albums, and paths or filter by status. Local coverage
+includes playable below-target files; they remain upgrade candidates.
+
+Syncs write `SeekSync-<playlist-id>.m3u8` in the configured output directory. Once
+full metadata reconciliation finishes, this playlist and the rekordbox XML retain
+existing playable copies when an upgrade fails. A later successful upgrade updates
+the reference. Original audio is left in place, and fallback export never changes
+the backend's retry index. Older backend-named M3U files are not migrated.

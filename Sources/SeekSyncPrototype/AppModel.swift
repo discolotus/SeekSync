@@ -14,15 +14,15 @@ struct PendingBatchSync: Identifiable {
     var youtubePolicy: YouTubePolicy
 }
 
-struct SyncQueueItem: Identifiable, Equatable {
-    let id = UUID()
+struct SyncQueueItem: Identifiable, Equatable, Codable {
+    var id = UUID()
     let playlist: Playlist
     let trigger: SyncTrigger
     let youtubePolicy: YouTubePolicy
     let command: SLDLCommand
     let youtubeFallbackEnabled: Bool
     let libraryReuseConditionPolicy: LibraryReuseConditionPolicy
-    let queuedAt = Date()
+    var queuedAt = Date()
 }
 
 @MainActor
@@ -41,6 +41,7 @@ final class AppModel: ObservableObject {
     @Published var pendingSync: PendingSync?
     @Published var pendingBatchSync: PendingBatchSync?
     @Published private(set) var syncQueue: [SyncQueueItem] = []
+    @Published private(set) var isQueuePaused = false
     @Published private(set) var libraryAnalyses: [String: PlaylistLibraryAnalysis]
     @Published private(set) var libraryAnalysisPlaylistIDs: Set<String> = []
     @Published private(set) var libraryAnalysisMessages: [String: String] = [:]
@@ -64,7 +65,7 @@ final class AppModel: ObservableObject {
     private let processRunner = SockseekProcessRunner()
     private let sockseekInstaller = SockseekInstaller()
     private let spotifyService = SpotifyService()
-    private let persistence = PrototypePersistence()
+    private let persistence: PrototypePersistence
     private var schedulerCancellable: AnyCancellable?
     private var activeRunTask: Task<Void, Never>?
     private var liveRunProgress: [UUID: SockseekProgressTracker] = [:]
@@ -132,7 +133,8 @@ final class AppModel: ObservableObject {
         if let id = libraryReindexPlaylistID { libraryAnalysisTasks[id]?.cancel() }
     }
 
-    init() {
+    init(persistence: PrototypePersistence = PrototypePersistence(), startServices: Bool = true) {
+        self.persistence = persistence
         let restored = try? persistence.load()
         self.importedPlaylists = restored?.importedPlaylists ?? []
         self.liveSpotifyPlaylists = restored?.cachedSpotifyPlaylists ?? []
@@ -148,6 +150,8 @@ final class AppModel: ObservableObject {
         }
         self.settings = restored?.settings ?? ClientSettings()
         self.libraryAnalyses = restored?.libraryAnalyses ?? [:]
+        self.syncQueue = restored?.syncQueue ?? []
+        self.isQueuePaused = !self.syncQueue.isEmpty || restored?.isQueuePaused == true
         if !self.liveSpotifyPlaylists.isEmpty {
             self.spotifyState = .cached(count: self.liveSpotifyPlaylists.count)
         }
@@ -180,9 +184,11 @@ final class AppModel: ObservableObject {
             configMessage = error.localizedDescription
         }
 
+        for analysis in libraryAnalyses.values { applyLibraryAnalysisSummary(analysis, updateTrackCount: false) }
         selectedPlaylistID = allPlaylists.first?.id
         if !liveSpotifyPlaylists.isEmpty || !importedPlaylists.isEmpty { removeFixturePlans() }
 
+        guard startServices else { return }
         Task { [weak self] in
             guard let self else { return }
             let state = await self.processRunner.version(at: self.settings.binaryPath)
@@ -374,7 +380,7 @@ final class AppModel: ObservableObject {
         }
         guard !isAnalyzingLibrary(for: pendingSync.playlist.id) else { return }
         self.pendingSync = nil
-        if activeRun == nil {
+        if activeRun == nil && !isQueuePaused && syncQueue.isEmpty {
             startSync(playlist: pendingSync.playlist, trigger: pendingSync.trigger, youtubePolicy: pendingSync.youtubePolicy)
         } else {
             enqueueSync(
@@ -394,11 +400,13 @@ final class AppModel: ObservableObject {
               offset == -1 || offset == 1,
               syncQueue.indices.contains(index + offset) else { return }
         syncQueue.swapAt(index, index + offset)
+        persist()
     }
 
     func removeQueuedSync(_ id: UUID) {
         guard let index = syncQueue.firstIndex(where: { $0.id == id }) else { return }
         let removed = syncQueue.remove(at: index)
+        persist()
         toastMessage = "Removed \(removed.playlist.name) from the sync queue."
     }
 
@@ -430,6 +438,7 @@ final class AppModel: ObservableObject {
         syncQueue.append(contentsOf: candidates.map {
             makeQueueItem(playlist: $0, trigger: .manual, youtubePolicy: pending.youtubePolicy)
         })
+        persist()
         if activeRun == nil { startNextQueuedSync() }
         toastMessage = "Queued \(candidates.count) playlist\(candidates.count == 1 ? "" : "s") for sync."
     }
@@ -561,7 +570,7 @@ final class AppModel: ObservableObject {
     }
 
     func tickScheduler(now: Date = Date()) {
-        guard activeRun == nil else { return }
+        guard activeRun == nil, !isQueuePaused, syncQueue.isEmpty else { return }
         let due = plans
             .filter { $0.enabled && $0.nextRunAt <= now }
             .compactMap { plan in playlist(for: plan).map { (plan, $0) } }
@@ -834,7 +843,7 @@ final class AppModel: ObservableObject {
         guard let active = activeRun else { return }
         updateRun(active.id) { $0.message = "Cancelling…" }
         activeRunTask?.cancel()
-        if !syncQueue.isEmpty {
+        if !syncQueue.isEmpty && !isQueuePaused {
             toastMessage = "Cancelling the current sync. The next queued playlist will start automatically."
         }
     }
@@ -912,6 +921,7 @@ final class AppModel: ObservableObject {
             return
         }
         syncQueue.append(makeQueueItem(playlist: playlist, trigger: trigger, youtubePolicy: youtubePolicy))
+        persist()
         let position = syncQueue.count
         toastMessage = position == 1
             ? "\(playlist.name) is next in the sync queue."
@@ -939,8 +949,14 @@ final class AppModel: ObservableObject {
         )
     }
 
+    func toggleQueuePaused() {
+        isQueuePaused.toggle()
+        persist()
+        if !isQueuePaused { startNextQueuedSync() }
+    }
+
     private func startNextQueuedSync() {
-        guard activeRun == nil, !syncQueue.isEmpty else { return }
+        guard activeRun == nil, !isQueuePaused, !syncQueue.isEmpty else { return }
         let next = syncQueue.removeFirst()
         launchSync(
             playlist: next.playlist,
@@ -1078,6 +1094,11 @@ final class AppModel: ObservableObject {
                 return
             }
             libraryAnalyses[playlist.id] = analysis
+            if command.value(after: "--write-playlist") == "true",
+               let path = command.value(after: "--playlist-path"),
+               analysis.hasCompletePlaylistMetadata == true {
+                try PlayablePlaylistExporter().write(analysis: analysis, to: URL(fileURLWithPath: path))
+            }
             applyLibraryAnalysisSummary(analysis)
             libraryAnalysisMessages[playlist.id] = "Track inventory updated from the completed Sockseek index."
         } catch {
@@ -1135,6 +1156,9 @@ final class AppModel: ObservableObject {
         }
         guard let run = runs.first(where: { $0.id == id }) else { return }
         updatePlaylistOutcome(for: run.playlistID, phase: phase, counts: counts)
+        if let analysis = libraryAnalyses[run.playlistID] {
+            applyLibraryAnalysisSummary(analysis)
+        }
         if let index = plans.firstIndex(where: { $0.playlistID == run.playlistID }) {
             plans[index].lastRunAt = Date()
             plans[index].nextRunAt = nextDailyRun(after: Date())
@@ -1151,7 +1175,8 @@ final class AppModel: ObservableObject {
         guard settings.isRekordboxXMLEnabled else { return }
         let sources = RekordboxXMLExporter.sources(
             for: allPlaylists,
-            outputDirectory: settings.outputDirectory
+            outputDirectory: settings.outputDirectory,
+            analyses: libraryAnalyses
         )
         guard !sources.isEmpty else { return }
         do {
@@ -1176,9 +1201,9 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func applyLibraryAnalysisSummary(_ analysis: PlaylistLibraryAnalysis) {
+    private func applyLibraryAnalysisSummary(_ analysis: PlaylistLibraryAnalysis, updateTrackCount: Bool = true) {
         func apply(_ playlist: inout Playlist) {
-            playlist.applyLibraryAnalysis(analysis)
+            playlist.applyLibraryAnalysis(analysis, updateTrackCount: updateTrackCount)
         }
         if let index = importedPlaylists.firstIndex(where: { $0.id == analysis.playlistID }) {
             apply(&importedPlaylists[index])
@@ -1257,7 +1282,9 @@ final class AppModel: ObservableObject {
             plans: plans,
             runs: Array(runs.prefix(30)),
             settings: safeSettings,
-            libraryAnalyses: libraryAnalyses
+            libraryAnalyses: libraryAnalyses,
+            syncQueue: syncQueue,
+            isQueuePaused: isQueuePaused
         )
         do {
             try persistence.save(state)

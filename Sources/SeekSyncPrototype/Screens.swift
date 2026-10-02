@@ -798,7 +798,7 @@ struct SyncQueueView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("Up next", systemImage: "text.line.first.and.arrowtriangle.forward")
+                Label(model.isQueuePaused ? "Queue paused" : "Up next", systemImage: "text.line.first.and.arrowtriangle.forward")
                     .font(.headline)
                 Spacer()
                 Text("\(model.queuedSyncCount) queued")

@@ -64,7 +64,7 @@ struct LibraryInventoryScreen: View {
             }
 
             if inventory.alreadyOwnedCount > 0 {
-                Text("\(inventory.alreadyOwnedCount) of \(inventory.entries.count) analyzed tracks already exist on this Mac. \"In your library\" tracks are linked from where they sit; \"below target\" tracks exist too, but miss the reuse conditions, so a sync replaces them rather than linking them.")
+                Text("\(inventory.alreadyOwnedCount) of \(inventory.entries.count) analyzed tracks already exist on this Mac. \"In your library\" tracks are linked from where they sit; \"below target\" tracks exist too, but miss the reuse conditions, so future syncs seek upgrades while exports keep playable copies.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)

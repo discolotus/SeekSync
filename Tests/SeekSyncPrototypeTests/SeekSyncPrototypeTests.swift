@@ -1391,6 +1391,32 @@ final class LibraryReuseTests: XCTestCase {
         XCTAssertEqual(analysis.tracks[2].localPath, belowTarget.path)
         XCTAssertEqual(analysis.tracks[2].quality?.bitrateKbps, 128)
         XCTAssertEqual(analysis.targetLabel, "MP3 · at least 256 kbps")
+        var previouslyDownloaded = previous
+        previouslyDownloaded.tracks[2].disposition = .downloaded
+        let retry = try await LibraryReuseAnalyzer().completedAnalysis(
+            playlist: playlist, seeds: seeds, previousAnalysis: previouslyDownloaded, command: command
+        )
+        XCTAssertEqual(retry?.tracks[2].localPath, belowTarget.path,
+                       "A failed upgrade must retain a still-existing playable file")
+        XCTAssertEqual(retry?.tracks[2].disposition, .libraryBelowThreshold)
+        var summary = playlist
+        summary.applyLibraryAnalysis(analysis)
+        XCTAssertEqual(summary.localCount, 3, "Below-target audio is locally available")
+        XCTAssertEqual(summary.upgradeCandidates, 1)
+        summary.health = .partial
+        summary.trackCount = 3
+        XCTAssertEqual(summary.statusLabel, "Upgrades pending")
+        summary.trackCount = 4
+        summary.applyLibraryAnalysis(analysis, updateTrackCount: false)
+        XCTAssertEqual(summary.trackCount, 4, "Restoring old inventory must not shrink newer catalog metadata")
+        var changedArguments = command.arguments
+        changedArguments[changedArguments.firstIndex(of: "--pref-format")! + 1] = "flac"
+        let stricter = try await LibraryReuseAnalyzer().completedAnalysis(
+            playlist: playlist, seeds: seeds, previousAnalysis: previouslyDownloaded,
+            command: SLDLCommand(executable: command.executable, arguments: changedArguments))
+        XCTAssertEqual(stricter?.tracks[2].localPath, belowTarget.path)
+
+
     }
 
     func testInstalledSockseekPreviewSeparatesReferenceBelowTargetAndDownload() async throws {
@@ -1837,7 +1863,7 @@ final class SyncExecutionKindTests: XCTestCase {
 @MainActor
 final class SyncQueueTests: XCTestCase {
     func testConfirmedSyncsQueueInFIFOOrderAndRejectDuplicates() {
-        let model = AppModel()
+        let model = makeModel()
         let first = Playlist.samples[0]
         let second = Playlist.samples[1]
         let third = Playlist.samples[2]
@@ -1860,7 +1886,7 @@ final class SyncQueueTests: XCTestCase {
     }
 
     func testCancellingCurrentSyncAutomaticallyStartsNextQueuedPlaylist() async throws {
-        let model = AppModel()
+        let model = makeModel()
         let first = Playlist.samples[0]
         let second = Playlist.samples[1]
 
@@ -1885,7 +1911,7 @@ final class SyncQueueTests: XCTestCase {
     }
 
     func testReorderingChangesNextJobWithoutChangingConfirmedCommands() async throws {
-        let model = AppModel()
+        let model = makeModel()
         for playlist in Playlist.samples.prefix(3) {
             model.showSyncPreview(for: playlist)
             model.confirmPendingSync()
@@ -1908,7 +1934,7 @@ final class SyncQueueTests: XCTestCase {
     }
 
     func testQueuedSyncCanBeRemoved() {
-        let model = AppModel()
+        let model = makeModel()
         let first = Playlist.samples[0]
         let second = Playlist.samples[1]
 
@@ -1939,7 +1965,7 @@ final class SyncQueueTests: XCTestCase {
 
         """.write(to: config, atomically: true, encoding: .utf8)
 
-        let model = AppModel()
+        let model = makeModel()
         model.setConfigPath(config.path)
         model.settings.libraryReuseEnabled = true
         model.settings.libraryDirectory = root.path
@@ -1965,6 +1991,58 @@ final class SyncQueueTests: XCTestCase {
         XCTAssertEqual(value(after: "--pref-max-bitrate", in: model.queuedSyncs[0].command), "200")
         XCTAssertEqual(value(after: "--pref-max-bitrate", in: model.command(for: second)), "192")
         model.cancelActiveRun()
+    }
+
+    private func makeModel() -> AppModel {
+        AppModel(persistence: PrototypePersistence(url: FileManager.default.temporaryDirectory
+            .appendingPathComponent("SeekSyncQueueTests-\(UUID().uuidString)/state.json")), startServices: false)
+    }
+
+    func testPausedQueuePersistsOrderCommandsAndRemovalAcrossRestart() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("SeekSyncQueueRestart-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let persistence = PrototypePersistence(url: root.appendingPathComponent("state.json"))
+        let model = AppModel(persistence: persistence, startServices: false)
+        model.toggleQueuePaused()
+        for playlist in Playlist.samples.prefix(3) {
+            model.showSyncPreview(for: playlist)
+            model.confirmPendingSync()
+        }
+        XCTAssertNil(model.activeRun)
+        model.moveQueuedSync(model.queuedSyncs[2].id, by: -1)
+        model.removeQueuedSync(model.queuedSyncs[0].id)
+        let expected = model.queuedSyncs
+        var saved = try persistence.load()
+        saved.isQueuePaused = false
+        try persistence.save(saved)
+        let restored = AppModel(persistence: persistence, startServices: false)
+        XCTAssertTrue(restored.isQueuePaused)
+        XCTAssertEqual(restored.queuedSyncs, expected)
+        restored.tickScheduler(now: Date.distantFuture)
+        XCTAssertNil(restored.activeRun)
+        restored.toggleQueuePaused()
+        XCTAssertEqual(restored.activeRun?.playlistID, expected[0].playlist.id)
+        XCTAssertEqual(restored.activeRun?.commandPreview, expected[0].command.displayString)
+        restored.toggleQueuePaused()
+        restored.cancelActiveRun()
+    }
+
+    func testPausingActiveQueuePreventsCancellationHandoff() async throws {
+        let model = makeModel()
+        for playlist in Playlist.samples.prefix(2) {
+            model.showSyncPreview(for: playlist)
+            model.confirmPendingSync()
+        }
+        model.toggleQueuePaused()
+        model.cancelActiveRun()
+        for _ in 0..<50 where model.activeRun != nil {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        XCTAssertNil(model.activeRun)
+        XCTAssertEqual(model.queuedSyncs.map(\.playlist.id), [Playlist.samples[1].id])
+        let restored = AppModel(persistence: PrototypePersistence(url: URL(fileURLWithPath: model.localAppDataPath)), startServices: false)
+        XCTAssertTrue(restored.isQueuePaused)
+        XCTAssertEqual(restored.queuedSyncs, model.queuedSyncs)
     }
 
     private func value(after flag: String, in command: SLDLCommand) -> String? {
@@ -2981,5 +3059,55 @@ final class PlaylistAccessErrorTests: XCTestCase {
     func testNonSpotify404DoesNotSuggestSpotifyRecovery() {
         let error = LibraryReuseAnalysisError.playlistExtractionFailed("Other provider: HTTP 404 NotFound")
         XCTAssertFalse(error.localizedDescription.contains("playlist you own"))
+    }
+}
+
+final class PlayablePlaylistExportTests: XCTestCase {
+    func testDownloadedFallbackIsBelowTargetWithoutRejectingM4AAudioCodecs() {
+        let mp3 = AudioFileQuality(format: "mp3", bitrateKbps: 320, sampleRateHz: 44100, bitDepth: nil, durationSeconds: 180)
+        XCTAssertTrue(mp3.missesTarget(format: "flac", minimumBitrate: 200))
+        XCTAssertFalse(mp3.missesTarget(format: AudioPreference.any.rawValue, minimumBitrate: 200))
+        let aac = AudioFileQuality(format: "aac", bitrateKbps: 128, sampleRateHz: 44100, bitDepth: nil, durationSeconds: 180)
+        XCTAssertFalse(aac.missesTarget(format: "m4a", minimumBitrate: 128))
+        XCTAssertTrue(aac.missesTarget(format: "m4a", minimumBitrate: 256))
+    }
+
+    func testFallbackExportPreservesOrderExcludesMissingFilesAndNeverChangesRetryIndex() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("SeekSyncPlayable-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fallback = root.appendingPathComponent("old.mp3")
+        let replacement = root.appendingPathComponent("new.flac")
+        try Data([0]).write(to: fallback)
+        try Data([1]).write(to: replacement)
+        func track(_ position: Int, _ disposition: PlaylistTrackDisposition, _ path: String?) -> PlaylistTrackRecord {
+            PlaylistTrackRecord(seed: PlaylistTrackSeed(position: position, artist: "Artist", title: "Track \(position)", album: "Album", lengthSeconds: 180), disposition: disposition, localPath: path, quality: nil)
+        }
+        var analysis = PlaylistLibraryAnalysis(playlistID: "fixture", playlistName: "Fixture", analyzedAt: Date(),
+            sourceLibraryPath: root.path, preferredFormat: "flac", minimumBitrateKbps: 200,
+            tracks: [track(2, .downloaded, replacement.path), track(1, .libraryBelowThreshold, fallback.path),
+                     track(3, .libraryBelowThreshold, root.appendingPathComponent("missing.mp3").path)],
+            basis: .completedSync, hasCompletePlaylistMetadata: true)
+        let index = root.appendingPathComponent("index.csv")
+        let failedIndex = "filepath,artist,album,title,length,tracktype,state,failurereason\n,Artist,Album,Track 1,180,0,2,9\n"
+        try failedIndex.write(to: index, atomically: true, encoding: .utf8)
+        let m3u = root.appendingPathComponent("playlist.m3u8")
+        let exporter = PlayablePlaylistExporter()
+        try exporter.write(analysis: analysis, to: m3u)
+        let contents = try String(contentsOf: m3u, encoding: .utf8)
+        XCTAssertEqual(contents.split(separator: "\n").filter { !$0.hasPrefix("#") }.map(String.init), [fallback.path, replacement.path])
+        let xml = root.appendingPathComponent("library.xml")
+        let count = try RekordboxXMLExporter().export(sources: [.init(name: "Fixture", indexPath: index.path, analysis: analysis)], to: xml)
+        XCTAssertEqual(count, 2)
+        XCTAssertTrue(try String(contentsOf: xml, encoding: .utf8).contains("old.mp3"))
+        XCTAssertEqual(try String(contentsOf: index, encoding: .utf8), failedIndex)
+        analysis.tracks[1].localPath = replacement.path
+        analysis.tracks[1].disposition = .downloaded
+        try exporter.write(analysis: analysis, to: m3u)
+        XCTAssertFalse(try String(contentsOf: m3u, encoding: .utf8).contains("old.mp3"))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fallback.path))
+        XCTAssertEqual(analysis.filteredTracks(query: "TRACK 1", disposition: .downloaded).count, 1)
+        XCTAssertEqual(analysis.filteredTracks(query: "missing.mp3", disposition: .libraryBelowThreshold).count, 1)
+        XCTAssertTrue(analysis.filteredTracks(query: "unknown", disposition: nil).isEmpty)
     }
 }
