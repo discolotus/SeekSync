@@ -823,9 +823,10 @@ struct LibraryReuseAnalyzer {
         stable: [SockseekIndexEntry],
         cached: [SockseekIndexEntry]
     ) -> [SockseekIndexEntry] {
-        guard !cached.isEmpty else { return stable }
         let stableKeys = Set(stable.map(\.exactKey))
-        return cached.filter { !stableKeys.contains($0.exactKey) } + stable
+        let merged = cached.filter { !stableKeys.contains($0.exactKey) } + stable
+        var seen: Set<String> = []
+        return merged.reversed().filter { seen.insert($0.exactKey).inserted }.reversed()
     }
 
     private func contains(_ candidate: String, in root: String) -> Bool {

@@ -1486,6 +1486,8 @@ final class LibraryReuseTests: XCTestCase {
         try """
         filepath,artist,album,title,length,tracktype,state,failurereason
         ./already-downloaded.mp3,Preview Artist,Preview Album,Already Downloaded,0,0,1,0
+        \(library.appendingPathComponent("below.mp3").path),Preview Artist,Preview Album,Below Track,0,0,3,0
+        \(library.appendingPathComponent("below.mp3").path),Preview Artist,Preview Album,Below Track,0,0,3,0
 
         """.write(to: stableIndex, atomically: true, encoding: .utf8)
 
