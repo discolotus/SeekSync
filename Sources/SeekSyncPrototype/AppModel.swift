@@ -1071,7 +1071,8 @@ final class AppModel: ObservableObject {
                 seeds: progressSeeds,
                 previousAnalysis: previousAnalysis,
                 command: command,
-                conditionPolicy: conditionPolicy
+                conditionPolicy: conditionPolicy,
+                settings: settings
             ) else {
                 libraryAnalysisMessages[playlist.id] = "The sync finished, but no readable stable index was available to refresh its track inventory."
                 return
@@ -1177,12 +1178,7 @@ final class AppModel: ObservableObject {
 
     private func applyLibraryAnalysisSummary(_ analysis: PlaylistLibraryAnalysis) {
         func apply(_ playlist: inout Playlist) {
-            playlist.trackCount = analysis.tracks.count
-            playlist.localCount = analysis.referenceCount + analysis.downloadedCount
-            playlist.upgradeCandidates = analysis.belowThresholdCount
-            if playlist.health == .ready, playlist.localCount < playlist.trackCount {
-                playlist.health = .partial
-            }
+            playlist.applyLibraryAnalysis(analysis)
         }
         if let index = importedPlaylists.firstIndex(where: { $0.id == analysis.playlistID }) {
             apply(&importedPlaylists[index])
@@ -1273,30 +1269,9 @@ final class AppModel: ObservableObject {
     }
 
     static func counts(from output: String, fallbackTrackCount: Int) -> RunCounts {
-        var counts = RunCounts()
-        let decoder = JSONDecoder()
-        for line in output.split(whereSeparator: \.isNewline) {
-            guard let data = line.data(using: .utf8),
-                  let event = try? decoder.decode(SockseekProgressEvent.self, from: data) else { continue }
-            if event.type == "track_state",
-               let delta = terminalCounts(
-                lifecycleState: event.data?.lifecycleState,
-                terminalOutcome: event.data?.terminalOutcome,
-                skipReason: event.data?.skipReason
-               ) {
-                counts.add(delta)
-            } else if event.type == "track_list" {
-                for track in event.data?.tracks ?? [] {
-                    if let delta = terminalCounts(
-                        lifecycleState: track.lifecycleState,
-                        terminalOutcome: track.terminalOutcome,
-                        skipReason: track.skipReason
-                    ) {
-                        counts.add(delta)
-                    }
-                }
-            }
-        }
+        var tracker = SockseekProgressTracker()
+        tracker.consume(output)
+        var counts = tracker.counts
         if counts.added + counts.alreadyBest + counts.unavailable + counts.needsReview == 0, fallbackTrackCount > 0 {
             counts.needsReview = fallbackTrackCount
         }

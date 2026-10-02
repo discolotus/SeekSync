@@ -253,7 +253,10 @@ struct PlaylistRow: View {
             }
         }
         .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(playlist.name), \(playlist.trackCount == 0 ? "track count loads when synced" : "\(playlist.trackCount) tracks"), \(playlist.health.label)")
+        .accessibilityValue("\(playlist.localCount) of \(playlist.trackCount) tracks available locally")
+        .accessibilityAddTraits(.isButton)
         .contextMenu {
             Button("Sync Now…") { model.showSyncPreview(for: playlist) }
             Button(model.isInPool(playlist.id) ? "Disable Daily Sync" : "Enable Daily Sync") {

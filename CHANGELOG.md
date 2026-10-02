@@ -3,6 +3,19 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.5.2] - 2026-10-02
+
+- Preserve full playlist inventories when backend progress includes only a sample
+  of tracks, and reconcile completed syncs against current playlist metadata.
+- Validate local library previews larger than 20 pending tracks without rejecting
+  valid sampled progress; retain complete terminal and index checks.
+- Canonicalize duplicate historical rows in temporary preview indexes.
+- Count existing tracks from backend totals when their detail rows are sampled.
+- Keep partial inventories from shrinking playlist totals or claiming full coverage.
+- Avoid live-network rate-limit delays in read-only, empty-mock library previews.
+- Attribute concurrent fallback failures to the correct track.
+- Expose playlist rows as accessible buttons with local coverage values.
+
 ## [0.5.1] - 2026-09-27
 
 - Explain Spotify playlist HTTP 404 failures with account, URL, and personalized
