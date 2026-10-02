@@ -3,6 +3,17 @@
 All notable changes to SeekSync are documented here. Versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-10-02
+
+- Save waiting syncs, their order, and confirmed commands across app restarts;
+  restore paused and add pause/resume controls for queue and scheduled starts.
+- Keep valid local audio visible after unsuccessful upgrade attempts and count
+  below-target files as locally available without clearing their upgrade status.
+- Keep playable fallback files in reconciled M3U and rekordbox exports without
+  marking failed downloads successful in the backend index.
+- Open saved track details directly from a playlist context menu, with search,
+  status filters, file paths, and measured audio quality.
+
 ## [0.5.2] - 2026-10-02
 
 - Preserve full playlist inventories when backend progress includes only a sample

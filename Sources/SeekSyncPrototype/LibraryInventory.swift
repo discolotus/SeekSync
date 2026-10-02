@@ -4,8 +4,7 @@ import Foundation
 /// generated playlist can point at it.
 ///
 /// The distinction the inventory exists to make is `referenced` versus
-/// `belowTarget`: both mean "you already own this", but only the first can be
-/// brought into a playlist as it stands. A below-target file is left alone and
+/// `belowTarget`: both mean "you already own this", and both can remain in playable exports. A below-target file is left alone and
 /// a sync looks for a replacement instead.
 enum LibraryInventoryAvailability: String, CaseIterable, Hashable {
     case referenced
@@ -40,7 +39,7 @@ enum LibraryInventoryAvailability: String, CaseIterable, Hashable {
         case .referenced:
             return "The playlist links to this file where it already lives. Nothing is copied or downloaded."
         case .belowTarget:
-            return "You already own this, but it misses the reuse conditions, so a sync looks for a replacement instead of linking it."
+            return "You already own this, but it misses the reuse conditions, so future syncs seek an upgrade while exports keep this playable copy."
         case .downloaded:
             return "Already in SeekSync's downloads folder from an earlier sync."
         case .missing:

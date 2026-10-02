@@ -330,7 +330,7 @@ struct SyncPreviewSheet: View {
     }
 
     private var primaryButtonTitle: String {
-        if model.activeRun != nil { return isLiveSync ? "Queue Sync" : "Queue Preview" }
+        if model.activeRun != nil || model.isQueuePaused { return isLiveSync ? "Queue Sync" : "Queue Preview" }
         return isLiveSync ? "Start Sync" : "Run Preview"
     }
 }
@@ -452,8 +452,8 @@ struct BatchSyncPreviewSheet: View {
                         SyncNotice(title: "Batch can’t start yet", detail: startBlocker, systemImage: "xmark.octagon.fill", color: .red)
                     } else if hasLiveSyncs {
                         SyncNotice(
-                            title: "This starts real downloads",
-                            detail: "Each playlist will search for missing or below-target tracks after you confirm. Cancelling the current sync advances to the next queued playlist.",
+                            title: model.isQueuePaused ? "Add to paused queue" : "This starts real downloads",
+                            detail: model.isQueuePaused ? "The queue is paused. These playlists will wait until you resume it in Sync Queue." : "Each playlist will search for missing or below-target tracks after you confirm. Cancelling the current sync advances to the next queued playlist.",
                             systemImage: "arrow.down.circle.fill",
                             color: .orange
                         )
@@ -509,7 +509,7 @@ struct BatchSyncPreviewSheet: View {
     }
 
     private var batchButtonTitle: String {
-        if model.activeRun != nil {
+        if model.activeRun != nil || model.isQueuePaused {
             return hasLiveSyncs ? "Queue \(pending.playlists.count) Syncs" : "Queue \(pending.playlists.count) Previews"
         }
         return hasLiveSyncs ? "Start \(pending.playlists.count) Syncs" : "Run \(pending.playlists.count) Previews"

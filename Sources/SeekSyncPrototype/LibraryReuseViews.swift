@@ -160,6 +160,8 @@ struct LibraryReuseAnalysisSummaryCard: View {
 /// qualify as references, so the user sees every proposed replacement before
 /// confirming a sync.
 struct PlaylistTrackListSheet: View {
+    @State private var query = ""
+    @State private var selectedDisposition: PlaylistTrackDisposition?
     @Environment(\.dismiss) private var dismiss
 
     let analysis: PlaylistLibraryAnalysis
@@ -225,6 +227,20 @@ struct PlaylistTrackListSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            HStack {
+                TextField("Search title, artist, album, or path", text: $query)
+                    .textFieldStyle(.roundedBorder)
+                Picker("Show", selection: $selectedDisposition) {
+                    Text("All tracks").tag(Optional<PlaylistTrackDisposition>.none)
+                    Text("Below target / upgrade pending").tag(Optional(PlaylistTrackDisposition.libraryBelowThreshold))
+                    Text("In library").tag(Optional(PlaylistTrackDisposition.libraryReference))
+                    Text("Downloaded").tag(Optional(PlaylistTrackDisposition.downloaded))
+                    Text("Download required").tag(Optional(PlaylistTrackDisposition.downloadRequired))
+                    Text("Unavailable").tag(Optional(PlaylistTrackDisposition.unavailable))
+                }
+                .frame(width: 280)
+            }
+            .padding(.horizontal, 22).padding(.bottom, 14)
             Divider()
 
             ScrollView {
@@ -237,7 +253,7 @@ struct PlaylistTrackListSheet: View {
 
                     TrackAnalysisSection(
                         title: "Below reuse target",
-                        detail: "These tracks already exist locally—in the selected library or downloads—but do not satisfy all current reuse conditions. Those include the audio target and Sockseek's metadata matching. A sync will look for replacements.",
+                        detail: "These tracks already exist locally—in the selected library or downloads—but do not satisfy all current reuse conditions. Those include the audio target and Sockseek's metadata matching. Playable copies stay in exports while future syncs look for replacements.",
                         systemImage: "arrow.down.right.circle.fill",
                         color: .orange,
                         tracks: belowThresholdTracks,
@@ -255,7 +271,7 @@ struct PlaylistTrackListSheet: View {
 
                     TrackAnalysisSection(
                         title: "Downloaded",
-                        detail: "These tracks were downloaded into SeekSync's destination rather than referenced from the existing library.",
+                        detail: "These tracks are in SeekSync's destination. Downloaded does not guarantee they meet every reuse condition; refresh analysis to check the current target.",
                         systemImage: "checkmark.circle.fill",
                         color: .green,
                         tracks: downloadedTracks,
@@ -374,7 +390,7 @@ struct PlaylistTrackListSheet: View {
     private func sortedTracks(
         matching predicate: (PlaylistTrackRecord) -> Bool
     ) -> [PlaylistTrackRecord] {
-        analysis.tracks
+        analysis.filteredTracks(query: query, disposition: selectedDisposition)
             .filter(predicate)
             .sorted { $0.seed.position < $1.seed.position }
     }

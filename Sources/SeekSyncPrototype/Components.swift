@@ -174,7 +174,7 @@ struct PlaylistHealthPill: View {
         case .ready:
             StatusPill(text: playlist.health.label, systemImage: "checkmark", tone: .green)
         case .partial:
-            StatusPill(text: "\(playlist.missingCount) missing", systemImage: "arrow.down.circle", tone: .orange)
+            StatusPill(text: playlist.missingCount > 0 ? "\(playlist.missingCount) missing" : "\(playlist.upgradeCandidates) upgrades pending", systemImage: "arrow.down.circle", tone: .orange)
         case .attention:
             StatusPill(text: attentionReason, systemImage: "exclamationmark", tone: .red)
         case .neverSynced:
@@ -197,6 +197,7 @@ struct PlaylistRow: View {
     @EnvironmentObject private var model: AppModel
     let playlist: Playlist
     var compact = false
+    @State private var showsTracks = false
 
     var body: some View {
         Button {
@@ -257,7 +258,14 @@ struct PlaylistRow: View {
         .accessibilityLabel("\(playlist.name), \(playlist.trackCount == 0 ? "track count loads when synced" : "\(playlist.trackCount) tracks"), \(playlist.health.label)")
         .accessibilityValue("\(playlist.localCount) of \(playlist.trackCount) tracks available locally")
         .accessibilityAddTraits(.isButton)
+        .sheet(isPresented: $showsTracks) {
+            if let analysis = model.libraryAnalyses[playlist.id] {
+                PlaylistTrackListSheet(analysis: analysis)
+            }
+        }
         .contextMenu {
+            Button("View Tracks and Quality…") { showsTracks = true }
+                .disabled(model.libraryAnalyses[playlist.id] == nil)
             Button("Sync Now…") { model.showSyncPreview(for: playlist) }
             Button(model.isInPool(playlist.id) ? "Disable Daily Sync" : "Enable Daily Sync") {
                 model.togglePlan(for: playlist)
@@ -368,6 +376,7 @@ struct TrackFailureDetailsView: View {
 struct ActiveSyncProgressView: View {
     let run: SyncRun
     var compact = false
+    @State private var showsTracks = false
 
     var body: some View {
         if let details = run.progressDetails {

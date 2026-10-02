@@ -15,6 +15,13 @@ struct SyncQueueScreen: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    HStack {
+                        Text(model.isQueuePaused ? "Queue paused" : "Queue ready").font(.headline)
+                        Spacer()
+                        Button(model.isQueuePaused ? "Resume queue" : "Pause queue") { model.toggleQueuePaused() }
+                    }
+                    Text("Pausing lets the current sync finish and prevents waiting jobs and daily schedules from starting.")
+                        .font(.caption).foregroundStyle(.secondary)
                     if let run = model.activeRun {
                         HStack {
                             Label("Running now", systemImage: "arrow.down.circle")
@@ -23,7 +30,7 @@ struct SyncQueueScreen: View {
                             Button("Cancel current sync") { model.cancelActiveRun() }
                         }
                         RunRow(run: run)
-                        Text("Cancelling the current sync starts the next waiting playlist.")
+                        Text(model.isQueuePaused ? "The queue is paused. Cancelling will not start another playlist." : "Cancelling the current sync starts the next waiting playlist.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                     if model.queuedSyncs.isEmpty {
@@ -36,7 +43,7 @@ struct SyncQueueScreen: View {
                     } else {
                         SyncQueueView(allowsReordering: true)
                     }
-                    Text("Waiting jobs are kept for this app session. Quitting SeekSync clears the queue.")
+                    Text("Waiting jobs and their order are saved. After restarting SeekSync, resume the queue when ready.")
                         .font(.caption).foregroundStyle(.secondary)
                     Divider()
                     HStack {

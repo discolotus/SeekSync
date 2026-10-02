@@ -24,6 +24,9 @@ struct SockseekCommandBuilder {
         arguments += ["--progress-json", "--no-progress"]
         let writesPlaylist = settings.writeM3UPlaylist || settings.isLibraryReuseEnabled
         arguments += ["--write-playlist", writesPlaylist ? "true" : "false"]
+        if writesPlaylist {
+            arguments += ["--playlist-path", playlistPath(for: playlist, outputDirectory: settings.outputDirectory)]
+        }
         if settings.isLibraryReuseEnabled, !settings.libraryDirectoryPath.isEmpty {
             arguments += ["--skip-existing", "true"]
             arguments += ["--skip-music-dir", settings.libraryDirectoryPath]
@@ -42,6 +45,13 @@ struct SockseekCommandBuilder {
             executable: NSString(string: settings.binaryPath).expandingTildeInPath,
             arguments: arguments
         )
+    }
+
+    func playlistPath(for playlist: Playlist, outputDirectory: String) -> String {
+        let filename = "SeekSync-" + URL(fileURLWithPath: indexPath(for: playlist, outputDirectory: outputDirectory))
+            .deletingPathExtension().lastPathComponent.replacingOccurrences(of: ".seeksync-index-", with: "") + ".m3u8"
+        return URL(fileURLWithPath: NSString(string: outputDirectory).expandingTildeInPath)
+            .appendingPathComponent(filename).path
     }
 
     func indexPath(for playlist: Playlist, outputDirectory: String) -> String {

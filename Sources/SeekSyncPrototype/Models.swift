@@ -65,15 +65,15 @@ struct Playlist: Identifiable, Hashable, Codable {
         return min(Double(localCount) / Double(trackCount), 1)
     }
 
-    mutating func applyLibraryAnalysis(_ analysis: PlaylistLibraryAnalysis) {
+    mutating func applyLibraryAnalysis(_ analysis: PlaylistLibraryAnalysis, updateTrackCount: Bool = true) {
         // A completed-run index may contain only tracks observed before a
         // failure or cancellation. Full metadata can reduce the catalog total.
-        trackCount = (analysis.basis == .preview || analysis.hasCompletePlaylistMetadata == true)
+        trackCount = (updateTrackCount && (analysis.basis == .preview || analysis.hasCompletePlaylistMetadata == true))
             ? analysis.tracks.count
             : max(trackCount, analysis.tracks.count)
-        localCount = analysis.referenceCount + analysis.downloadedCount
+        localCount = analysis.tracks.filter { $0.localPath?.isEmpty == false }.count
         upgradeCandidates = analysis.belowThresholdCount
-        if health == .ready, localCount < trackCount {
+        if health == .ready, localCount < trackCount || upgradeCandidates > 0 {
             health = .partial
         }
     }
@@ -547,7 +547,7 @@ enum SpotifyConnectionState: Equatable {
     }
 }
 
-struct SLDLCommand: Equatable {
+struct SLDLCommand: Equatable, Codable {
     let executable: String
     let arguments: [String]
 
@@ -571,6 +571,8 @@ struct PrototypeState: Codable {
     var runs: [SyncRun]
     var settings: ClientSettings
     var libraryAnalyses: [String: PlaylistLibraryAnalysis]? = nil
+    var syncQueue: [SyncQueueItem]? = nil
+    var isQueuePaused: Bool? = nil
 }
 
 extension Date {

@@ -153,6 +153,7 @@ struct RekordboxXMLExporter {
     struct Source {
         var name: String
         var indexPath: String
+        var analysis: PlaylistLibraryAnalysis? = nil
     }
 
     var fileManager: FileManager = .default
@@ -163,12 +164,13 @@ struct RekordboxXMLExporter {
     /// Demo fixtures never run Sockseek, so they can never have an index to
     /// export. Everything else is offered to `export`, which drops whatever
     /// has not synced yet.
-    static func sources(for playlists: [Playlist], outputDirectory: String) -> [Source] {
+    static func sources(for playlists: [Playlist], outputDirectory: String, analyses: [String: PlaylistLibraryAnalysis] = [:]) -> [Source] {
         let builder = SockseekCommandBuilder()
         return playlists.filter { $0.isFixture != true }.map { playlist in
             Source(
                 name: playlist.name,
-                indexPath: builder.indexPath(for: playlist, outputDirectory: outputDirectory)
+                indexPath: builder.indexPath(for: playlist, outputDirectory: outputDirectory),
+                analysis: analyses[playlist.id]
             )
         }
     }
@@ -187,6 +189,9 @@ struct RekordboxXMLExporter {
     @discardableResult
     func export(sources: [Source], to url: URL) throws -> Int {
         let builderSources: [RekordboxCollectionBuilder.Source] = sources.compactMap { source in
+            if let analysis = source.analysis, analysis.basis == .preview || analysis.hasCompletePlaylistMetadata == true {
+                return .init(name: source.name, entries: PlayablePlaylistExporter(fileManager: fileManager).entries(for: analysis))
+            }
             let indexURL = URL(fileURLWithPath: NSString(string: source.indexPath).expandingTildeInPath)
             // A playlist that has never synced has no index. Skip it and
             // export the rest rather than failing the whole library.
@@ -205,5 +210,33 @@ struct RekordboxXMLExporter {
         )
         try xml.write(to: url, atomically: true, encoding: .utf8)
         return collection.tracks.count
+    }
+}
+
+/// Export-only resolution. Never writes a success back to the download index:
+/// a playable fallback remains eligible for a better match on the next sync.
+struct PlayablePlaylistExporter {
+    var fileManager: FileManager = .default
+
+    func entries(for analysis: PlaylistLibraryAnalysis) -> [SockseekIndexEntry] {
+        analysis.tracks.sorted { $0.seed.position < $1.seed.position }.compactMap { track in
+            guard let path = track.localPath, fileManager.fileExists(atPath: path) else { return nil }
+            return SockseekIndexEntry(path: path, artist: track.seed.artist, album: track.seed.album ?? "",
+                title: track.seed.title, lengthSeconds: track.seed.lengthSeconds ?? -1, state: 3, failureReason: 0)
+        }
+    }
+
+    func write(analysis: PlaylistLibraryAnalysis, to url: URL) throws {
+        let entries = entries(for: analysis)
+        func singleLine(_ text: String) -> String {
+            text.replacingOccurrences(of: "\r", with: " ").replacingOccurrences(of: "\n", with: " ")
+        }
+        var lines = ["#EXTM3U", "#PLAYLIST:\(singleLine(analysis.playlistName))"]
+        for entry in entries {
+            guard let path = entry.path, !path.contains("\n"), !path.contains("\r") else { continue }
+            lines += ["#EXTINF:\(entry.lengthSeconds),\(singleLine(entry.artist)) - \(singleLine(entry.title))", path]
+        }
+        try fileManager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
     }
 }
