@@ -1403,6 +1403,9 @@ final class LibraryReuseTests: XCTestCase {
         summary.applyLibraryAnalysis(analysis)
         XCTAssertEqual(summary.localCount, 3, "Below-target audio is locally available")
         XCTAssertEqual(summary.upgradeCandidates, 1)
+        summary.health = .partial
+        summary.trackCount = 3
+        XCTAssertEqual(summary.statusLabel, "Upgrades pending")
         summary.trackCount = 4
         summary.applyLibraryAnalysis(analysis, updateTrackCount: false)
         XCTAssertEqual(summary.trackCount, 4, "Restoring old inventory must not shrink newer catalog metadata")

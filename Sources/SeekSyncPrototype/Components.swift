@@ -172,13 +172,13 @@ struct PlaylistHealthPill: View {
     var body: some View {
         switch playlist.health {
         case .ready:
-            StatusPill(text: playlist.health.label, systemImage: "checkmark", tone: .green)
+            StatusPill(text: playlist.statusLabel, systemImage: "checkmark", tone: .green)
         case .partial:
             StatusPill(text: playlist.missingCount > 0 ? "\(playlist.missingCount) missing" : "\(playlist.upgradeCandidates) upgrades pending", systemImage: "arrow.down.circle", tone: .orange)
         case .attention:
             StatusPill(text: attentionReason, systemImage: "exclamationmark", tone: .red)
         case .neverSynced:
-            StatusPill(text: playlist.health.label, systemImage: nil, tone: .neutral)
+            StatusPill(text: playlist.statusLabel, systemImage: nil, tone: .neutral)
         }
     }
 
@@ -189,7 +189,7 @@ struct PlaylistHealthPill: View {
         if playlist.missingCount > 0 {
             return "\(playlist.missingCount) missing"
         }
-        return playlist.health.label
+        return playlist.statusLabel
     }
 }
 
@@ -255,7 +255,7 @@ struct PlaylistRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(playlist.name), \(playlist.trackCount == 0 ? "track count loads when synced" : "\(playlist.trackCount) tracks"), \(playlist.health.label)")
+        .accessibilityLabel("\(playlist.name), \(playlist.trackCount == 0 ? "track count loads when synced" : "\(playlist.trackCount) tracks"), \(playlist.statusLabel)")
         .accessibilityValue("\(playlist.localCount) of \(playlist.trackCount) tracks available locally")
         .accessibilityAddTraits(.isButton)
         .sheet(isPresented: $showsTracks) {

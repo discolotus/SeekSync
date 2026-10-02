@@ -59,6 +59,11 @@ struct Playlist: Identifiable, Hashable, Codable {
     var isFixture: Bool?
     var snapshotID: String? = nil
 
+    var statusLabel: String {
+        if health == .partial, missingCount == 0, upgradeCandidates > 0 { return "Upgrades pending" }
+        return health.label
+    }
+
     var missingCount: Int { max(trackCount - localCount, 0) }
     var coverage: Double {
         guard trackCount > 0 else { return 0 }
