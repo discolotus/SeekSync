@@ -1510,19 +1510,21 @@ final class LibraryReuseTests: XCTestCase {
         XCTAssertEqual(analysis.tracks[3].localPath, output.appendingPathComponent("already-downloaded.mp3").path)
 
         let largeCSV = root.appendingPathComponent("large-playlist.csv")
-        let extraRows = (1...30).map { "Missing Artist,Missing Album,Missing Track \($0),0" }
+        let extraRows = (1...70).map { "Missing Artist,Missing Album,Missing Track \($0),0" }
         let originalCSV = try String(contentsOf: playlistCSV)
         try (originalCSV + "\n" + extraRows.joined(separator: "\n") + "\n")
             .write(to: largeCSV, atomically: true, encoding: .utf8)
         var largePlaylist = playlist
         largePlaylist.spotifyURL = largeCSV.path
-        largePlaylist.trackCount = 34
+        largePlaylist.trackCount = 74
+        let previewStarted = Date()
         let largeAnalysis = try await analyzer.analyze(playlist: largePlaylist, settings: settings, forceReindex: true)
-        XCTAssertEqual(largeAnalysis.tracks.count, 34)
+        XCTAssertLessThan(Date().timeIntervalSince(previewStarted), 30, "Offline previews must not wait for live Soulseek rate limits")
+        XCTAssertEqual(largeAnalysis.tracks.count, 74)
         XCTAssertEqual(largeAnalysis.referenceCount, 1)
         XCTAssertEqual(largeAnalysis.belowThresholdCount, 1)
         XCTAssertEqual(largeAnalysis.downloadedCount, 1)
-        XCTAssertEqual(largeAnalysis.downloadRequiredCount, 31)
+        XCTAssertEqual(largeAnalysis.downloadRequiredCount, 71)
 
         let historicalIndex = output.appendingPathComponent("historical-index.csv")
         try """
@@ -1547,14 +1549,14 @@ final class LibraryReuseTests: XCTestCase {
             ]),
             settings: changedSettings
         )
-        XCTAssertEqual(completed?.tracks.count, 34)
+        XCTAssertEqual(completed?.tracks.count, 74)
         XCTAssertEqual(completed?.tracks.map(\.seed.title), largeAnalysis.tracks.map(\.seed.title))
         XCTAssertEqual(completed?.downloadedCount, 1)
         XCTAssertEqual(completed?.hasCompletePlaylistMetadata, true)
         var shrinkingPlaylist = largePlaylist
         shrinkingPlaylist.trackCount = 100
         shrinkingPlaylist.applyLibraryAnalysis(try XCTUnwrap(completed))
-        XCTAssertEqual(shrinkingPlaylist.trackCount, 34)
+        XCTAssertEqual(shrinkingPlaylist.trackCount, 74)
 
         // A second preview of an unchanged library must be served from the
         // cached index without changing what it reports.

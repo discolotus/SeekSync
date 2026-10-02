@@ -958,6 +958,9 @@ struct LibraryReuseAnalyzer {
                 "--index-path", index.path,
                 "--mock-files-dir", mock.path,
                 "--mock-files-no-read-tags",
+                // Empty mock searches never contact Soulseek; avoid live-network
+                // rate-limit waits during a read-only library preview.
+                "--searches-renew-time", "1",
                 "--skip-existing", "true",
                 "--skip-mode-output-dir", "index",
                 "--skip-music-dir", libraryPath,
