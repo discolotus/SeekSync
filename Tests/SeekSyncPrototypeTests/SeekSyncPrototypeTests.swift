@@ -1362,6 +1362,17 @@ final class LibraryReuseTests: XCTestCase {
             ]
         )
 
+        // Real Sockseek track_list events include only a sample of pending
+        // tracks; the stable index has the full playlist at completion.
+        let sampledResult = try await LibraryReuseAnalyzer().completedAnalysis(
+            playlist: playlist,
+            seeds: Array(seeds.prefix(1)),
+            previousAnalysis: nil,
+            command: command
+        )
+        XCTAssertEqual(sampledResult?.tracks.count, 3)
+        XCTAssertEqual(sampledResult?.tracks.map(\.seed.title), seeds.map(\.title))
+
         let result = try await LibraryReuseAnalyzer().completedAnalysis(
             playlist: playlist,
             seeds: seeds,
@@ -1497,6 +1508,53 @@ final class LibraryReuseTests: XCTestCase {
         XCTAssertNotNil(analysis.tracks[1].localPath)
         XCTAssertNil(analysis.tracks[2].localPath)
         XCTAssertEqual(analysis.tracks[3].localPath, output.appendingPathComponent("already-downloaded.mp3").path)
+
+        let largeCSV = root.appendingPathComponent("large-playlist.csv")
+        let extraRows = (1...30).map { "Missing Artist,Missing Album,Missing Track \($0),0" }
+        let originalCSV = try String(contentsOf: playlistCSV)
+        try (originalCSV + "\n" + extraRows.joined(separator: "\n") + "\n")
+            .write(to: largeCSV, atomically: true, encoding: .utf8)
+        var largePlaylist = playlist
+        largePlaylist.spotifyURL = largeCSV.path
+        largePlaylist.trackCount = 34
+        let largeAnalysis = try await analyzer.analyze(playlist: largePlaylist, settings: settings, forceReindex: true)
+        XCTAssertEqual(largeAnalysis.tracks.count, 34)
+        XCTAssertEqual(largeAnalysis.referenceCount, 1)
+        XCTAssertEqual(largeAnalysis.belowThresholdCount, 1)
+        XCTAssertEqual(largeAnalysis.downloadedCount, 1)
+        XCTAssertEqual(largeAnalysis.downloadRequiredCount, 31)
+
+        let historicalIndex = output.appendingPathComponent("historical-index.csv")
+        try """
+        filepath,artist,album,title,length,tracktype,state,failurereason
+        ./already-downloaded.mp3,Preview Artist,Preview Album,Already Downloaded,0,0,1,0
+        ./already-downloaded.mp3,Preview Artist,Preview Album,Already Downloaded,0,0,1,0
+        ,Removed Artist,Old Album,Removed Song,0,0,2,9
+
+        """.write(to: historicalIndex, atomically: true, encoding: .utf8)
+        var changedSettings = settings
+        changedSettings.binaryPath = "/missing-binary"
+        changedSettings.configPath = "/missing-config"
+        changedSettings.profileName = "changed-profile"
+        let completed = try await analyzer.completedAnalysis(
+            playlist: largePlaylist,
+            seeds: Array(largeAnalysis.tracks.prefix(20).map(\.seed)),
+            previousAnalysis: nil,
+            command: SLDLCommand(executable: binary, arguments: [
+                "--config", settings.configPath,
+                "--index-path", historicalIndex.path, "--output-dir", output.path,
+                "--skip-music-dir", library.path, "--pref-format", "mp3", "--pref-min-bitrate", "256"
+            ]),
+            settings: changedSettings
+        )
+        XCTAssertEqual(completed?.tracks.count, 34)
+        XCTAssertEqual(completed?.tracks.map(\.seed.title), largeAnalysis.tracks.map(\.seed.title))
+        XCTAssertEqual(completed?.downloadedCount, 1)
+        XCTAssertEqual(completed?.hasCompletePlaylistMetadata, true)
+        var shrinkingPlaylist = largePlaylist
+        shrinkingPlaylist.trackCount = 100
+        shrinkingPlaylist.applyLibraryAnalysis(try XCTUnwrap(completed))
+        XCTAssertEqual(shrinkingPlaylist.trackCount, 34)
 
         // A second preview of an unchanged library must be served from the
         // cached index without changing what it reports.
@@ -1691,6 +1749,15 @@ final class SockseekProgressParserTests: XCTestCase {
             withFallback.failures[0].reasonDescription,
             "Soulseek found no file, and yt-dlp found no usable YouTube result."
         )
+    }
+
+    func testConcurrentFallbackLogIsAttributedToItsOwnTrack() {
+        var tracker = SockseekProgressTracker(youtubeFallbackEnabled: true)
+        tracker.consume(#"{"type":"search_start","data":{"artist":"Soulseek Artist","title":"Peer Track"}}"#)
+        tracker.consume("[011] SongJob: running fallback: Other Artist - Video Track (430s)")
+        tracker.consume(#"{"type":"track_state","data":{"artist":"Soulseek Artist","title":"Peer Track","lifecycleState":"Terminal","terminalOutcome":"Failed","failureReason":"AllDownloadsFailed"}}"#)
+        tracker.consume(#"{"type":"track_state","data":{"artist":"Other Artist","title":"Video Track","lifecycleState":"Terminal","terminalOutcome":"Failed","failureReason":"AllDownloadsFailed"}}"#)
+        XCTAssertEqual(tracker.failures.map(\.source), [.soulseek, .youtubeFallback])
     }
 
     func testIdentifiesFailureDuringYtDlpFallback() {
@@ -2014,6 +2081,36 @@ final class ProcessRunnerTests: XCTestCase {
 }
 
 final class PlaylistSyncOutcomeTests: XCTestCase {
+    func testPartialSyncInventoryDoesNotShrinkKnownPlaylist() {
+        var playlist = Playlist.samples[0]
+        playlist.trackCount = 100
+        playlist.health = .ready
+        let records = (1...20).map { position in
+            PlaylistTrackRecord(
+                seed: PlaylistTrackSeed(position: position, artist: "Artist", title: "Track \(position)", album: nil, lengthSeconds: 180),
+                disposition: .downloaded, localPath: "/music/\(position).flac", quality: nil
+            )
+        }
+        let analysis = PlaylistLibraryAnalysis(
+            playlistID: playlist.id, playlistName: playlist.name, analyzedAt: Date(),
+            sourceLibraryPath: "/music", preferredFormat: "flac", minimumBitrateKbps: 200,
+            tracks: records, basis: .completedSync
+        )
+        playlist.applyLibraryAnalysis(analysis)
+        XCTAssertEqual(playlist.trackCount, 100)
+        XCTAssertEqual(playlist.localCount, 20)
+        XCTAssertEqual(playlist.missingCount, 80)
+        XCTAssertEqual(playlist.health, .partial)
+    }
+
+    func testSuccessfulSubsetDoesNotMarkWholePlaylistUpToDate() {
+        var playlist = Playlist.samples[0]
+        playlist.trackCount = 100
+        playlist.applySyncOutcome(phase: .completed, counts: RunCounts(added: 20))
+        XCTAssertEqual(playlist.localCount, 20)
+        XCTAssertEqual(playlist.health, .partial)
+    }
+
     func testPartialRunUpdatesCoverageFromResolvedAndUnavailableTracks() {
         var playlist = Playlist.samples[0]
         playlist.trackCount = 10

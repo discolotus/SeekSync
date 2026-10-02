@@ -1071,7 +1071,8 @@ final class AppModel: ObservableObject {
                 seeds: progressSeeds,
                 previousAnalysis: previousAnalysis,
                 command: command,
-                conditionPolicy: conditionPolicy
+                conditionPolicy: conditionPolicy,
+                settings: settings
             ) else {
                 libraryAnalysisMessages[playlist.id] = "The sync finished, but no readable stable index was available to refresh its track inventory."
                 return
@@ -1177,12 +1178,7 @@ final class AppModel: ObservableObject {
 
     private func applyLibraryAnalysisSummary(_ analysis: PlaylistLibraryAnalysis) {
         func apply(_ playlist: inout Playlist) {
-            playlist.trackCount = analysis.tracks.count
-            playlist.localCount = analysis.referenceCount + analysis.downloadedCount
-            playlist.upgradeCandidates = analysis.belowThresholdCount
-            if playlist.health == .ready, playlist.localCount < playlist.trackCount {
-                playlist.health = .partial
-            }
+            playlist.applyLibraryAnalysis(analysis)
         }
         if let index = importedPlaylists.firstIndex(where: { $0.id == analysis.playlistID }) {
             apply(&importedPlaylists[index])

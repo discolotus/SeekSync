@@ -202,6 +202,7 @@ struct SockseekProgressTracker {
     private var terminalPositions: Set<Int> = []
     private var unpositionedTerminalKeys: Set<String> = []
     private var fallbackAttemptedTrackKeys: Set<String> = []
+    private var fallbackAttemptedTrackDescriptions: Set<String> = []
     private let youtubeFallbackEnabled: Bool?
 
     init(youtubeFallbackEnabled: Bool? = nil) {
@@ -214,10 +215,14 @@ struct SockseekProgressTracker {
             if let data = line.data(using: .utf8),
                let event = try? decoder.decode(SockseekProgressEvent.self, from: data) {
                 consume(event)
-            } else if line.localizedCaseInsensitiveContains("running fallback:"),
-                      let currentTrack = snapshot.currentTrack,
-                      let key = trackKey(artist: currentTrack.artist, title: currentTrack.title) {
-                fallbackAttemptedTrackKeys.insert(key)
+            } else if let marker = line.range(of: "running fallback:", options: .caseInsensitive) {
+                // Several jobs log concurrently: the displayed current track
+                // may be unrelated to the job entering fallback.
+                let description = String(line[marker.upperBound...])
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: #"\s+\([0-9.]+s\)$"#, with: "", options: .regularExpression)
+                    .lowercased()
+                fallbackAttemptedTrackDescriptions.insert(description)
             }
         }
     }
@@ -412,8 +417,11 @@ struct SockseekProgressTracker {
         }
 
         let key = trackKey(artist: artist, title: title)
+        let description = "\(artist ?? "") - \(title ?? "")"
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let fallbackAttempted = normalized(activityPhase) == "runningfallback"
             || key.map(fallbackAttemptedTrackKeys.contains) == true
+            || fallbackAttemptedTrackDescriptions.contains(description)
         let reason = normalized(failureReason)
         if fallbackAttempted {
             return reason == "nosearchresults" || reason == "nomatchingresults"

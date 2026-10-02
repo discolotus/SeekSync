@@ -99,6 +99,7 @@ struct PlaylistLibraryAnalysis: Codable, Hashable {
     var playlistTrackCount: Int? = nil
     var basis: PlaylistLibraryAnalysisBasis? = nil
     var conditionFingerprint: String? = nil
+    var hasCompletePlaylistMetadata: Bool? = nil
 
     var targetLabel: String {
         let format = preferredFormat.uppercased()
@@ -463,6 +464,24 @@ struct LibraryReuseAnalyzer {
         self.cache = cache
     }
 
+    func readPlaylist(playlist: Playlist, settings: ClientSettings) async throws -> [PlaylistTrackSeed] {
+        let extraction = try await runner.run(metadataCommand(for: playlist, settings: settings))
+        let seeds = jobsParser.parse(extraction.output)
+        guard !seeds.isEmpty else {
+            let detail = extraction.output
+                .split(whereSeparator: \.isNewline)
+                .suffix(3)
+                .joined(separator: " ")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if extraction.exitCode != 0, !detail.isEmpty {
+                throw LibraryReuseAnalysisError.playlistExtractionFailed(detail)
+            }
+            throw LibraryReuseAnalysisError.noPlaylistTracks
+        }
+
+        return seeds
+    }
+
     func analyze(
         playlist: Playlist,
         settings: ClientSettings,
@@ -491,19 +510,7 @@ struct LibraryReuseAnalyzer {
         defer { try? fileManager.removeItem(at: root) }
 
         await onStage?("Reading playlist metadata without contacting Soulseek…")
-        let extraction = try await runner.run(metadataCommand(for: playlist, settings: settings))
-        let seeds = jobsParser.parse(extraction.output)
-        guard !seeds.isEmpty else {
-            let detail = extraction.output
-                .split(whereSeparator: \.isNewline)
-                .suffix(3)
-                .joined(separator: " ")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if extraction.exitCode != 0, !detail.isEmpty {
-                throw LibraryReuseAnalysisError.playlistExtractionFailed(detail)
-            }
-            throw LibraryReuseAnalysisError.noPlaylistTracks
-        }
+        let seeds = try await readPlaylist(playlist: playlist, settings: settings)
 
         await onPlaylistRead?()
 
@@ -668,7 +675,8 @@ struct LibraryReuseAnalyzer {
         seeds progressSeeds: [PlaylistTrackSeed],
         previousAnalysis: PlaylistLibraryAnalysis?,
         command: SLDLCommand,
-        conditionPolicy: LibraryReuseConditionPolicy = LibraryReuseConditionPolicy(arguments: [])
+        conditionPolicy: LibraryReuseConditionPolicy = LibraryReuseConditionPolicy(arguments: []),
+        settings: ClientSettings? = nil
     ) async throws -> PlaylistLibraryAnalysis? {
         guard let indexPath = command.value(after: "--index-path"),
               let outputPath = command.value(after: "--output-dir") else {
@@ -703,9 +711,17 @@ struct LibraryReuseAnalyzer {
         }
 
         let seeds: [PlaylistTrackSeed]
-        if !progressSeeds.isEmpty {
+        // The stable index can retain historical or duplicate rows across runs.
+        // When settings are available, current playlist metadata is authoritative.
+        if var metadataSettings = settings {
+            metadataSettings.binaryPath = command.executable
+            metadataSettings.configPath = command.value(after: "--config") ?? ""
+            metadataSettings.profileName = command.value(after: "--profile") ?? ""
+            seeds = try await readPlaylist(playlist: playlist, settings: metadataSettings)
+        } else if !progressSeeds.isEmpty, progressSeeds.count >= entries.count {
             seeds = progressSeeds
-        } else if let reusablePrevious, !reusablePrevious.tracks.isEmpty {
+        } else if let reusablePrevious,
+                  reusablePrevious.tracks.count >= entries.count {
             seeds = reusablePrevious.tracks.map(\.seed)
         } else {
             seeds = entries.enumerated().map { offset, entry in
@@ -774,7 +790,8 @@ struct LibraryReuseAnalyzer {
             playlistSnapshotID: playlist.snapshotID,
             playlistTrackCount: seeds.count,
             basis: .completedSync,
-            conditionFingerprint: conditionPolicy.fingerprint
+            conditionFingerprint: conditionPolicy.fingerprint,
+            hasCompletePlaylistMetadata: settings != nil
         )
     }
 
@@ -835,8 +852,17 @@ struct LibraryReuseAnalyzer {
         let processedSeeds = progress.playlistTracks
         let processedKeys = processedSeeds.map(Self.trackKey).sorted()
         let expectedKeys = seeds.map(Self.trackKey).sorted()
-        let processedExpectedPlaylist = processedSeeds.count == seeds.count
-            && processedKeys == expectedKeys
+        // track_list contains all existing tracks but only a sample of pending
+        // tracks. Validate that sample here; terminal totals and the matched
+        // stable index below must still account for every expected track.
+        var remainingKeys = Dictionary(grouping: expectedKeys, by: { $0 }).mapValues(\.count)
+        let sampleMatches = processedKeys.allSatisfy { key in
+            guard let remaining = remainingKeys[key], remaining > 0 else { return false }
+            remainingKeys[key] = remaining - 1
+            return true
+        }
+        let processedExpectedPlaylist = !processedSeeds.isEmpty
+            && processedSeeds.count <= seeds.count && sampleMatches
 
         let counts = progress.counts
         let completedExpectedPlaylist = progress.snapshot.totalTracks == seeds.count

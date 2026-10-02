@@ -65,6 +65,19 @@ struct Playlist: Identifiable, Hashable, Codable {
         return min(Double(localCount) / Double(trackCount), 1)
     }
 
+    mutating func applyLibraryAnalysis(_ analysis: PlaylistLibraryAnalysis) {
+        // A completed-run index may contain only tracks observed before a
+        // failure or cancellation. Full metadata can reduce the catalog total.
+        trackCount = (analysis.basis == .preview || analysis.hasCompletePlaylistMetadata == true)
+            ? analysis.tracks.count
+            : max(trackCount, analysis.tracks.count)
+        localCount = analysis.referenceCount + analysis.downloadedCount
+        upgradeCandidates = analysis.belowThresholdCount
+        if health == .ready, localCount < trackCount {
+            health = .partial
+        }
+    }
+
     mutating func applySyncOutcome(phase: RunPhase, counts: RunCounts, at date: Date = Date()) {
         lastSyncedAt = date
         let resolved = counts.added + counts.upgraded + counts.alreadyBest
@@ -80,7 +93,7 @@ struct Playlist: Identifiable, Hashable, Codable {
 
         switch phase {
         case .completed:
-            health = .ready
+            health = localCount < trackCount ? .partial : .ready
             needsReview = 0
             upgradeCandidates = 0
         case .partial:
