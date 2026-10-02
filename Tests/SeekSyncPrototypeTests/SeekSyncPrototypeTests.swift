@@ -1755,6 +1755,7 @@ final class SockseekProgressParserTests: XCTestCase {
         )
     }
 
+    @MainActor
     func testSampledExistingTracksUseFullAggregateCount() throws {
         var tracker = SockseekProgressTracker()
         let tracks = (0..<20).map { index in
@@ -1769,6 +1770,7 @@ final class SockseekProgressParserTests: XCTestCase {
         XCTAssertEqual(tracker.counts.alreadyBest, 23)
         XCTAssertEqual(tracker.counts.unavailable, 1)
         XCTAssertEqual(tracker.snapshot.completedTracks, 24)
+        XCTAssertEqual(AppModel.counts(from: line, fallbackTrackCount: 24).alreadyBest, 23)
     }
 
     func testConcurrentFallbackLogIsAttributedToItsOwnTrack() {

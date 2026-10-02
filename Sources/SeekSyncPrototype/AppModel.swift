@@ -1269,30 +1269,9 @@ final class AppModel: ObservableObject {
     }
 
     static func counts(from output: String, fallbackTrackCount: Int) -> RunCounts {
-        var counts = RunCounts()
-        let decoder = JSONDecoder()
-        for line in output.split(whereSeparator: \.isNewline) {
-            guard let data = line.data(using: .utf8),
-                  let event = try? decoder.decode(SockseekProgressEvent.self, from: data) else { continue }
-            if event.type == "track_state",
-               let delta = terminalCounts(
-                lifecycleState: event.data?.lifecycleState,
-                terminalOutcome: event.data?.terminalOutcome,
-                skipReason: event.data?.skipReason
-               ) {
-                counts.add(delta)
-            } else if event.type == "track_list" {
-                for track in event.data?.tracks ?? [] {
-                    if let delta = terminalCounts(
-                        lifecycleState: track.lifecycleState,
-                        terminalOutcome: track.terminalOutcome,
-                        skipReason: track.skipReason
-                    ) {
-                        counts.add(delta)
-                    }
-                }
-            }
-        }
+        var tracker = SockseekProgressTracker()
+        tracker.consume(output)
+        var counts = tracker.counts
         if counts.added + counts.alreadyBest + counts.unavailable + counts.needsReview == 0, fallbackTrackCount > 0 {
             counts.needsReview = fallbackTrackCount
         }
