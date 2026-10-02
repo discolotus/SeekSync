@@ -268,6 +268,12 @@ struct SockseekProgressTracker {
                     failureMessage: track.failureMessage
                 )
             }
+            // Existing-track details are sampled too. The aggregate accounts
+            // for already-terminal tracks omitted from that sample.
+            let reportedExisting = min(max(0, data.existing ?? 0), snapshot.totalTracks)
+            let omittedExisting = max(0, reportedExisting - counts.alreadyBest)
+            counts.alreadyBest += omittedExisting
+            snapshot.completedTracks += omittedExisting
         case "search_start":
             setCurrentTrack(from: data, activity: .searching)
         case "download_start":
@@ -466,6 +472,7 @@ struct SockseekProgressEvent: Decodable {
 
 struct SockseekProgressData: Decodable {
     let total: Int?
+    let existing: Int?
     let tracks: [SockseekTrackProgress]?
     let index: Int?
     let artist: String?

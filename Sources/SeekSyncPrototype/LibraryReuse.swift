@@ -852,7 +852,7 @@ struct LibraryReuseAnalyzer {
         let processedSeeds = progress.playlistTracks
         let processedKeys = processedSeeds.map(Self.trackKey).sorted()
         let expectedKeys = seeds.map(Self.trackKey).sorted()
-        // track_list contains all existing tracks but only a sample of pending
+        // track_list contains only samples of existing and pending
         // tracks. Validate that sample here; terminal totals and the matched
         // stable index below must still account for every expected track.
         var remainingKeys = Dictionary(grouping: expectedKeys, by: { $0 }).mapValues(\.count)

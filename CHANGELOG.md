@@ -9,6 +9,7 @@ All notable changes to SeekSync are documented here. Versions follow
   of tracks, and reconcile completed syncs against current playlist metadata.
 - Validate local library previews larger than 20 pending tracks without rejecting
   valid sampled progress; retain complete terminal and index checks.
+- Count existing tracks from backend totals when their detail rows are sampled.
 - Keep partial inventories from shrinking playlist totals or claiming full coverage.
 - Avoid live-network rate-limit delays in read-only, empty-mock library previews.
 - Attribute concurrent fallback failures to the correct track.

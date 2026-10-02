@@ -1753,6 +1753,22 @@ final class SockseekProgressParserTests: XCTestCase {
         )
     }
 
+    func testSampledExistingTracksUseFullAggregateCount() throws {
+        var tracker = SockseekProgressTracker()
+        let tracks = (0..<20).map { index in
+            ["index": index, "artist": "Artist", "title": "Track \(index)",
+             "lifecycleState": "Terminal", "terminalOutcome": "Skipped", "skipReason": "AlreadyExists"] as [String: Any]
+        }
+        let event: [String: Any] = ["type": "track_list", "data": ["total": 24, "existing": 23, "pending": 1, "tracks": tracks]]
+        let line = String(decoding: try JSONSerialization.data(withJSONObject: event), as: UTF8.self)
+        tracker.consume(line)
+        tracker.consume(line)
+        tracker.consume(#"{"type":"track_state","data":{"artist":"Missing","title":"Missing","lifecycleState":"Terminal","terminalOutcome":"Failed","failureReason":"NoSearchResults"}}"#)
+        XCTAssertEqual(tracker.counts.alreadyBest, 23)
+        XCTAssertEqual(tracker.counts.unavailable, 1)
+        XCTAssertEqual(tracker.snapshot.completedTracks, 24)
+    }
+
     func testConcurrentFallbackLogIsAttributedToItsOwnTrack() {
         var tracker = SockseekProgressTracker(youtubeFallbackEnabled: true)
         tracker.consume(#"{"type":"search_start","data":{"artist":"Soulseek Artist","title":"Peer Track"}}"#)
