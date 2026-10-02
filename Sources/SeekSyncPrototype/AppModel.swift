@@ -44,6 +44,13 @@ final class AppModel: ObservableObject {
     @Published private(set) var libraryAnalyses: [String: PlaylistLibraryAnalysis]
     @Published private(set) var libraryAnalysisPlaylistIDs: Set<String> = []
     @Published private(set) var libraryAnalysisMessages: [String: String] = [:]
+    @Published private(set) var playlistReadFailures: [String: String] = [:]
+
+    func playlistReadBlocker(for playlist: Playlist) -> String? {
+        guard playlist.executionKind == .sockseek else { return nil }
+        return playlistReadFailures[playlist.id]
+    }
+
     @Published var toastMessage: String?
     @Published var configMessage = "Loaded without changing the file."
     @Published var isConfigDirty = false
@@ -361,6 +368,11 @@ final class AppModel: ObservableObject {
 
     func confirmPendingSync() {
         guard let pendingSync else { return }
+        if let blocker = playlistReadBlocker(for: pendingSync.playlist) {
+            toastMessage = blocker
+            return
+        }
+        guard !isAnalyzingLibrary(for: pendingSync.playlist.id) else { return }
         self.pendingSync = nil
         if activeRun == nil {
             startSync(playlist: pendingSync.playlist, trigger: pendingSync.trigger, youtubePolicy: pendingSync.youtubePolicy)
@@ -768,7 +780,12 @@ final class AppModel: ObservableObject {
                     playlist: playlist,
                     settings: settingsSnapshot,
                     conditionPolicy: conditionPolicySnapshot,
-                    forceReindex: forceReindex
+                    forceReindex: forceReindex,
+                    onPlaylistRead: { [weak self] in
+                        await MainActor.run {
+                            _ = self?.playlistReadFailures.removeValue(forKey: playlist.id)
+                        }
+                    }
                 ) { [weak self] stage in
                     await MainActor.run {
                         self?.libraryAnalysisMessages[playlist.id] = stage
@@ -782,6 +799,7 @@ final class AppModel: ObservableObject {
                     self.libraryAnalysisTasks.removeValue(forKey: playlist.id)
                     return false
                 }
+                self.playlistReadFailures.removeValue(forKey: playlist.id)
                 self.libraryAnalyses[playlist.id] = analysis
                 self.applyLibraryAnalysisSummary(analysis)
                 self.libraryAnalysisMessages[playlist.id] = "Analysis complete."
@@ -794,6 +812,14 @@ final class AppModel: ObservableObject {
                 self.libraryAnalysisPlaylistIDs.remove(playlist.id)
                 self.libraryAnalysisTasks.removeValue(forKey: playlist.id)
             } catch {
+                if let failure = error as? LibraryReuseAnalysisError {
+                    switch failure {
+                    case .playlistExtractionFailed, .noPlaylistTracks:
+                        self.playlistReadFailures[playlist.id] = failure.localizedDescription
+                    case .missingLibrary, .previewPassIncomplete:
+                        break
+                    }
+                }
                 self.libraryAnalysisMessages[playlist.id] = error.localizedDescription
                 self.libraryAnalysisPlaylistIDs.remove(playlist.id)
                 self.libraryAnalysisTasks.removeValue(forKey: playlist.id)

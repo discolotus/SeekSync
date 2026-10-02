@@ -175,6 +175,10 @@ enum LibraryReuseAnalysisError: LocalizedError {
         case .missingLibrary:
             return "The existing music library folder is unavailable or unreadable."
         case .playlistExtractionFailed(let detail):
+            let normalized = detail.lowercased()
+            if normalized.contains("spotify"), normalized.contains("http 404") {
+                return "Spotify could not provide this playlist (HTTP 404). The link may be unavailable, private to another account, or restricted through Spotify’s API, including some personalized playlists. Open the link in Spotify and check the account. For a personalized playlist, try copying its tracks into a regular playlist you own and import that playlist’s URL. Then retry Analyze Library. No music was downloaded."
+            }
             return "Could not read the playlist without downloading: \(detail)"
         case .noPlaylistTracks:
             return "Sockseek did not return any song tracks for this playlist."
@@ -464,6 +468,7 @@ struct LibraryReuseAnalyzer {
         settings: ClientSettings,
         conditionPolicy: LibraryReuseConditionPolicy = LibraryReuseConditionPolicy(arguments: []),
         forceReindex: Bool = false,
+        onPlaylistRead: (() async -> Void)? = nil,
         onStage: ((String) async -> Void)? = nil
     ) async throws -> PlaylistLibraryAnalysis {
         let libraryPath = NSString(string: settings.libraryDirectoryPath).expandingTildeInPath
@@ -499,6 +504,8 @@ struct LibraryReuseAnalyzer {
             }
             throw LibraryReuseAnalysisError.noPlaylistTracks
         }
+
+        await onPlaylistRead?()
 
         let input = root.appendingPathComponent("playlist.csv")
         try writePlaylistCSV(seeds, to: input)
